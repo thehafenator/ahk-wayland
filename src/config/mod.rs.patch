@@ -1,0 +1,38 @@
+--- a/src/config/mod.rs
++++ b/src/config/mod.rs
+@@ -1,3 +1,4 @@
++use crate::ahk;
+ pub mod application;
+ pub mod device;
+ mod key;
+@@ -77,12 +78,14 @@
+ 
+ enum ConfigFiletype {
+     Yaml,
+     Toml,
++    Ahk,
+ }
+ 
+ fn get_file_ext(filename: &Path) -> ConfigFiletype {
+     match filename.extension().and_then(|ext| ext.to_str()) {
+         Some("yml") | Some("yaml") => ConfigFiletype::Yaml,
+         Some("toml") => ConfigFiletype::Toml,
++        Some("ahk") => ConfigFiletype::Ahk,
+         _ => ConfigFiletype::Yaml,
+     }
+ }
+@@ -92,6 +95,15 @@
+     let config_contents = fs::read_to_string(&filenames[0])?;
+ 
+     let mut config: Config = match get_file_ext(&filenames[0]) {
++        ConfigFiletype::Ahk => {
++            let ahk_config = ahk::parse_ahk_file(&filenames[0])
++                .map_err(|e| format!("AHK parse error: {}", e))?;
++            let mut config = Config::default();
++            // Convert AHK hotkeys to xremap format (simplified for now)
++            println!("Loaded {} AHK hotkeys", ahk_config.hotkeys.len());
++            config
++        }
+         ConfigFiletype::Yaml => serde_yaml::from_str(&config_contents)?,
+         ConfigFiletype::Toml => toml::from_str(&config_contents)?,
+     };

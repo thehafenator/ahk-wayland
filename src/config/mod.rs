@@ -26,6 +26,7 @@ use std::{
     time::SystemTime,
 };
 
+use crate::ahk::{AhkAction, parse_ahk_file};
 use self::{
     key::parse_key,
     keymap::{build_keymap_table, KeymapEntry},
@@ -61,16 +62,42 @@ pub struct Config {
     pub enable_wheel: bool,
 }
 
+impl Config {
+    pub fn new() -> Self {
+        Config {
+            modmap: Vec::new(),
+            keymap: Vec::new(),
+            default_mode: "default".to_string(),
+            virtual_modifiers: Vec::new(),
+            keypress_delay_ms: 0,
+            shared: IgnoredAny,
+            modify_time: None,
+            keymap_table: HashMap::new(),
+            enable_wheel: true,
+        }
+    }
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 enum ConfigFiletype {
     Yaml,
     Toml,
+    Ahk,
 }
 
 fn get_file_ext(filename: &Path) -> ConfigFiletype {
     match filename.extension() {
         Some(f) => {
-            if f.to_str().unwrap_or("").to_lowercase() == "toml" {
+            let ext = f.to_str().unwrap_or("").to_lowercase();
+            if ext == "toml" {
                 ConfigFiletype::Toml
+            } else if ext == "ahk" {
+                ConfigFiletype::Ahk
             } else {
                 ConfigFiletype::Yaml
             }
@@ -80,10 +107,58 @@ fn get_file_ext(filename: &Path) -> ConfigFiletype {
 }
 
 pub fn load_configs(filenames: &[PathBuf]) -> Result<Config, Box<dyn error::Error>> {
+    
     // Assumes filenames is non-empty
     let config_contents = fs::read_to_string(&filenames[0])?;
 
     let mut config: Config = match get_file_ext(&filenames[0]) {
+        ConfigFiletype::Ahk => {
+            let ahk_config = parse_ahk_file(&filenames[0])
+                .map_err(|e| format!("AHK parse error: {}", e))?;
+            
+            let mut config = Config::new();
+            
+            // Convert AHK hotkeys to xremap keymaps
+            let _hotkey_count = ahk_config.hotkeys.len();
+            for hotkey in ahk_config.hotkeys {
+                let mut keymap = Keymap {
+                    name: String::new(),
+                    remap: HashMap::new(),
+                    application: None,
+                    window: None,
+                    device: None,
+                    mode: None,
+                    exact_match: false,
+                };
+                
+                // Convert modifiers to KeyPress format
+                let modifiers: Vec<key_press::Modifier> = hotkey.modifiers.iter().map(|k| {
+                    match k {
+                        &Key::KEY_LEFTCTRL | &Key::KEY_RIGHTCTRL => key_press::Modifier::Control,
+                        &Key::KEY_LEFTALT | &Key::KEY_RIGHTALT => key_press::Modifier::Alt,
+                        &Key::KEY_LEFTSHIFT | &Key::KEY_RIGHTSHIFT => key_press::Modifier::Shift,
+                        &Key::KEY_LEFTMETA | &Key::KEY_RIGHTMETA => key_press::Modifier::Windows,
+                        k => key_press::Modifier::Key(k.clone()),
+                    }
+                }).collect();
+                
+                let key_press = key_press::KeyPress { 
+                    key: hotkey.key,
+                    modifiers,
+                };
+                
+                let actions = match hotkey.action {
+                    AhkAction::Run(parts) => vec![keymap_action::KeymapAction::Launch(parts)],
+                    _ => vec![],
+                };
+                
+                keymap.remap.insert(key_press, actions);
+                config.keymap.push(keymap);
+            }
+            
+            println!("Loaded {} AHK hotkeys", _hotkey_count);
+            config
+        }
         ConfigFiletype::Yaml => serde_yaml::from_str(&config_contents)?,
         ConfigFiletype::Toml => toml::from_str(&config_contents)?,
     };
@@ -91,6 +166,47 @@ pub fn load_configs(filenames: &[PathBuf]) -> Result<Config, Box<dyn error::Erro
     for filename in &filenames[1..] {
         let config_contents = fs::read_to_string(filename)?;
         let c: Config = match get_file_ext(filename) {
+            ConfigFiletype::Ahk => {
+                let ahk_config = parse_ahk_file(filename)
+                    .map_err(|e| format!("AHK parse error: {}", e))?;
+                let mut cfg = Config::new();
+                let _hotkey_count = ahk_config.hotkeys.len();
+                for hotkey in ahk_config.hotkeys {
+                    let mut keymap = Keymap {
+                        name: String::new(),
+                        remap: HashMap::new(),
+                        application: None,
+                        window: None,
+                        device: None,
+                        mode: None,
+                        exact_match: false,
+                    };
+                    
+                    let modifiers: Vec<key_press::Modifier> = hotkey.modifiers.iter().map(|k| {
+                        match k {
+                            &Key::KEY_LEFTCTRL | &Key::KEY_RIGHTCTRL => key_press::Modifier::Control,
+                            &Key::KEY_LEFTALT | &Key::KEY_RIGHTALT => key_press::Modifier::Alt,
+                            &Key::KEY_LEFTSHIFT | &Key::KEY_RIGHTSHIFT => key_press::Modifier::Shift,
+                            &Key::KEY_LEFTMETA | &Key::KEY_RIGHTMETA => key_press::Modifier::Windows,
+                            k => key_press::Modifier::Key(k.clone()),
+                        }
+                    }).collect();
+                    
+                    let key_press = key_press::KeyPress { 
+                        key: hotkey.key,
+                        modifiers,
+                    };
+                    
+                    let actions = match hotkey.action {
+                        AhkAction::Run(parts) => vec![keymap_action::KeymapAction::Launch(parts)],
+                        _ => vec![],
+                    };
+                    
+                    keymap.remap.insert(key_press, actions);
+                    cfg.keymap.push(keymap);
+                }
+                cfg
+            }
             ConfigFiletype::Yaml => serde_yaml::from_str(&config_contents)?,
             ConfigFiletype::Toml => toml::from_str(&config_contents)?,
         };
@@ -133,12 +249,8 @@ fn deserialize_virtual_modifiers<'de, D>(deserializer: D) -> Result<Vec<Key>, D:
 where
     D: Deserializer<'de>,
 {
-    let key_strs = Vec::<String>::deserialize(deserializer)?;
-    let mut keys: Vec<Key> = vec![];
-    for key_str in key_strs {
-        keys.push(parse_key(&key_str).map_err(serde::de::Error::custom)?);
-    }
-    Ok(keys)
+    let key_names = Vec::<String>::deserialize(deserializer)?;
+    key_names.into_iter().map(|name| parse_key(&name).map_err(serde::de::Error::custom)).collect()
 }
 
 fn const_true() -> bool {

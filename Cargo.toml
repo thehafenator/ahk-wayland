@@ -47,6 +47,3 @@ udev = ["dep:udev"]
 niri = ["niri-ipc"]
 device-test = []
 
-[profile.release]
-codegen-units = 1
-lto = true

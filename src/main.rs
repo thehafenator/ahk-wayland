@@ -9,6 +9,7 @@ use client::build_client;
 use config::{config_watcher, load_configs};
 use device::InputDevice;
 use event::Event;
+use xremap::ahk;
 use nix::libc::ENODEV;
 use nix::sys::inotify::{AddWatchFlags, Inotify, InotifyEvent};
 use nix::sys::select::select;
