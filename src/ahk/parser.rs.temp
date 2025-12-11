@@ -1,0 +1,15 @@
+fn parse_action(action_str: &str) -> Result<AhkAction, String> {
+    let s = action_str.trim();
+    if let Some(rest) = s.strip_prefix("Run") {
+        let cmd = rest.trim().trim_matches(|c| c == '"' || c == '\'');
+        let parts: Vec<String> = cmd.split_whitespace().map(String::from).collect();
+        return Ok(AhkAction::Run(parts));
+    }
+    for prefix in ["SendInput ", "SendEvent ", "Send "] {
+        if let Some(rest) = s.strip_prefix(prefix) {
+            let keys = rest.trim_matches(|c| c == '"' || c == '\'').to_string();
+            return Ok(AhkAction::Send(keys));
+        }
+    }
+    Err(format!("Unknown action: {s}"))
+}

@@ -12,6 +12,7 @@ pub struct AhkHotkey {
     pub key: KeyCode,
     pub action: AhkAction,
     pub context: Option<String>,
+    pub is_wildcard: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -19,6 +20,7 @@ pub struct AhkHotstring {
     pub trigger: String,
     pub replacement: String,
     pub immediate: bool,
+    pub case_sensitive: bool,
     pub context: Option<String>,
 }
 
@@ -27,4 +29,5 @@ pub enum AhkAction {
     Run(Vec<String>),
     Send(String),
     Remap(Vec<KeyCode>),
+    Sleep(u64),
 }

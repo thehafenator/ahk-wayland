@@ -7,38 +7,6 @@ pub struct AhkParser {
     hotif_contexts: Vec<String>,
 }
 
-fn unescape_ahk_string(s: &str) -> String {
-    let mut result = String::new();
-    let mut chars = s.chars().peekable();
-    
-    while let Some(ch) = chars.next() {
-        if ch == '`' {
-            // AHK escape character
-            if let Some(&next) = chars.peek() {
-                chars.next();
-                match next {
-                    'n' => result.push('\n'),
-                    'r' => result.push('\r'),
-                    't' => result.push('\t'),
-                    '`' => result.push('`'),
-                    '"' => result.push('"'),
-                    '\'' => result.push('\''),
-                    _ => {
-                        result.push('`');
-                        result.push(next);
-                    }
-                }
-            } else {
-                result.push('`');
-            }
-        } else {
-            result.push(ch);
-        }
-    }
-    
-    result
-}
-
 impl AhkParser {
     pub fn new() -> Self {
         Self {
@@ -125,13 +93,6 @@ impl AhkParser {
 
         let hotkey_def = parts[0].trim();
         let action_str = parts[1].trim();
-        
-        // Only strip comments if semicolon is preceded by whitespace (not inside quotes)
-        let action_str = if let Some(comment_pos) = action_str.find(" ;") {
-            &action_str[..comment_pos]
-        } else {
-            action_str
-        };
 
         let (modifiers, key, is_wildcard) = self.parse_key_combo(hotkey_def)?;
         let action = self.parse_action(action_str)?;
@@ -204,28 +165,14 @@ impl AhkParser {
         if let Some(rest) = s.strip_prefix("Run(") {
             if let Some(cmd) = rest.strip_suffix(')') {
                 let cmd = cmd.trim().trim_matches(|c| c == '"' || c == '\'');
-                let cmd = unescape_ahk_string(cmd);
                 let parts: Vec<String> = cmd.split_whitespace().map(String::from).collect();
                 return Ok(AhkAction::Run(parts));
             }
         }
 
-        // Handle Send with parentheses: Send("text") or SendInput("text") or SendEvent("text")
-        for prefix in ["SendInput(", "SendEvent(", "Send("] {
-            if let Some(rest) = s.strip_prefix(prefix) {
-                if let Some(content) = rest.strip_suffix(')') {
-                    let keys = content.trim().trim_matches(|c| c == '"' || c == '\'');
-                    let keys = unescape_ahk_string(keys);
-                    return Ok(AhkAction::Send(keys));
-                }
-            }
-        }
-
-        // Handle Send with space: Send "text"
         for prefix in ["SendInput ", "SendEvent ", "Send "] {
             if let Some(rest) = s.strip_prefix(prefix) {
-                let keys = rest.trim_matches(|c| c == '"' || c == '\'');
-                let keys = unescape_ahk_string(keys);
+                let keys = rest.trim_matches(|c| c == '"' || c == '\'').to_string();
                 return Ok(AhkAction::Send(keys));
             }
         }
