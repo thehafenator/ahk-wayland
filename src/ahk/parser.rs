@@ -10,7 +10,7 @@ pub struct AhkParser {
 fn unescape_ahk_string(s: &str) -> String {
     let mut result = String::new();
     let mut chars = s.chars().peekable();
-    
+
     while let Some(ch) = chars.next() {
         if ch == '`' {
             // AHK escape character
@@ -35,7 +35,7 @@ fn unescape_ahk_string(s: &str) -> String {
             result.push(ch);
         }
     }
-    
+
     result
 }
 
@@ -46,44 +46,49 @@ impl AhkParser {
         }
     }
 
-    pub fn parse_file(&mut self, content: &str) -> Result<AhkConfig, String> {
+pub fn parse_file(&mut self, content: &str) -> Result<AhkConfig, String> {
         let mut hotkeys = Vec::new();
         let mut hotstrings = Vec::new();
         let mut current_context = None;
 
-        for line in content.lines() {
-            let line = line.trim();
-            
-            if line.is_empty() || line.starts_with(';') {
-                continue;
-            }
+for line in content.lines() {
+    let line = line.trim();
 
-            if line.starts_with("#HotIf") {
-                current_context = self.parse_hotif(line)?;
-                continue;
-            }
+    if line.is_empty() || line.starts_with(';') {
+        continue;
+    }
 
-            if line == "#HotIf" {
-                current_context = None;
-                continue;
-            }
+    if line.starts_with("#HotIf") {
+        current_context = self.parse_hotif(line)?;
+        continue;
+    }
 
-            if line.contains("::") {
-                let double_colon_count = line.matches("::").count();
-                if double_colon_count >= 2 {
-                    if let Some(hotstring) = self.parse_hotstring(line, current_context.clone())? {
-                        hotstrings.push(hotstring);
-                        continue;
-                    }
-                }
-            }
+    if line == "#HotIf" {
+        current_context = None;
+        continue;
+    }
 
-            if line.contains("::") {
-                if let Some(hotkey) = self.parse_hotkey(line, current_context.clone())? {
-                    hotkeys.push(hotkey);
-                }
-            }
+    // First: try to parse as hotkey (lines with exactly one :: and modifier/key on left)
+    if line.contains("::") && !line.starts_with(':') && line.matches("::").count() == 1 {
+        if let Some(hotkey) = self.parse_hotkey(line, current_context.clone())? {
+            hotkeys.push(hotkey);
+            continue;
         }
+    }
+
+    // Second: try to parse as hotstring (starts with : or has options)
+    if let Some(hotstring) = self.parse_hotstring(line, current_context.clone())? {
+        hotstrings.push(hotstring);
+        continue;
+    }
+
+    // Fallback: if it has :: but didn't match above, treat as hotkey
+    if line.contains("::") {
+        if let Some(hotkey) = self.parse_hotkey(line, current_context.clone())? {
+            hotkeys.push(hotkey);
+        }
+    }
+}
 
         Ok(AhkConfig { hotkeys, hotstrings })
     }
@@ -99,17 +104,19 @@ impl AhkParser {
 
     fn parse_hotstring(&self, line: &str, context: Option<String>) -> Result<Option<AhkHotstring>, String> {
         let re = Regex::new(r"^(:([*?CcOoPpSsIiKkEeXxTtBbZz0-9]*):)?([^:]+)::(.*)$").unwrap();
-        
+
         if let Some(caps) = re.captures(line) {
             let options = caps.get(2).map(|m| m.as_str()).unwrap_or("");
             let trigger = caps[3].to_string();
             let replacement = caps[4].to_string();
-            
+
             Ok(Some(AhkHotstring {
                 trigger,
                 replacement,
                 immediate: options.contains('*'),
                 case_sensitive: options.contains('C'),
+                omit_char: options.contains('O') || options.contains('o'),
+                execute: options.contains('X') || options.contains('x'),
                 context,
             }))
         } else {
@@ -125,7 +132,7 @@ impl AhkParser {
 
         let hotkey_def = parts[0].trim();
         let action_str = parts[1].trim();
-        
+
         // Only strip comments if semicolon is preceded by whitespace (not inside quotes)
         let action_str = if let Some(comment_pos) = action_str.find(" ;") {
             &action_str[..comment_pos]
@@ -186,14 +193,12 @@ impl AhkParser {
                 if let Some(mod_key) = string_to_key(parts[0].trim()) {
                     modifiers.push(mod_key);
                 }
-                let main_key = string_to_key(parts[1].trim())
-                    .ok_or_else(|| format!("Unknown key: {}", parts[1]))?;
+                let main_key = string_to_key(parts[1].trim()).ok_or_else(|| format!("Unknown key: {}", parts[1]))?;
                 return Ok((modifiers, main_key, is_wildcard));
             }
         }
 
-        let key = string_to_key(rest.trim())
-            .ok_or_else(|| format!("Unknown key: {}", rest))?;
+        let key = string_to_key(rest.trim()).ok_or_else(|| format!("Unknown key: {}", rest))?;
 
         Ok((modifiers, key, is_wildcard))
     }
@@ -340,9 +345,8 @@ pub fn string_to_key(s: &str) -> Option<KeyCode> {
 }
 
 pub fn parse_ahk_file(path: &Path) -> Result<AhkConfig, String> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("Failed to read file: {}", e))?;
-    
+    let content = std::fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))?;
+
     let mut parser = AhkParser::new();
     parser.parse_file(&content)
 }

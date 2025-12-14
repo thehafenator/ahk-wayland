@@ -20,7 +20,7 @@ pub fn parse_send_string(input: &str) -> Vec<SendToken> {
                     tokens.push(SendToken::Text(text_buffer.clone()));
                     text_buffer.clear();
                 }
-                
+
                 chars.next();
                 match ch {
                     '^' => current_mods.push(KeyCode::KEY_LEFTCTRL),
@@ -36,7 +36,7 @@ pub fn parse_send_string(input: &str) -> Vec<SendToken> {
                     tokens.push(SendToken::Text(text_buffer.clone()));
                     text_buffer.clear();
                 }
-                
+
                 chars.next();
                 let mut key_name = String::new();
                 while let Some(&c) = chars.peek() {
@@ -47,7 +47,7 @@ pub fn parse_send_string(input: &str) -> Vec<SendToken> {
                     key_name.push(c);
                     chars.next();
                 }
-                
+
                 if let Some(key) = parse_special_key(&key_name) {
                     tokens.push(SendToken::Key {
                         key,
@@ -64,7 +64,7 @@ pub fn parse_send_string(input: &str) -> Vec<SendToken> {
                         tokens.push(SendToken::Text(text_buffer.clone()));
                         text_buffer.clear();
                     }
-                    
+
                     if let Some(key) = char_to_key(c) {
                         tokens.push(SendToken::Key {
                             key,
@@ -79,7 +79,7 @@ pub fn parse_send_string(input: &str) -> Vec<SendToken> {
             }
         }
     }
-    
+
     // Flush remaining text
     if !text_buffer.is_empty() {
         tokens.push(SendToken::Text(text_buffer));

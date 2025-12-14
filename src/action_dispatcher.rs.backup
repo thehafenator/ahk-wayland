@@ -32,18 +32,23 @@ impl ActionDispatcher {
             Action::KeyEvent(key_event) => self.on_key_event(key_event)?,
             Action::RelativeEvent(relative_event) => self.on_relative_event(relative_event)?,
             Action::MouseMovementEventCollection(mouse_movement_events) => {
+                // Sending all mouse movement events at once, unseparated by synchronization events.
                 self.send_mousemovement_event_batch(mouse_movement_events)?;
+
+                // Mouse movement events need to be sent all at once because they would otherwise be separated by a synchronization event¹,
+                // which the OS handles differently from two unseparated mouse movement events.
+                // For example,
+                // a REL_X event², followed by a SYNCHRONIZATION event, followed by a REL_Y event³, followed by a SYNCHRONIZATION event,
+                // will move the mouse cursor by a different amount than
+                // a REL_X event followed by a REL_Y event followed by a SYNCHRONIZATION event.
+
+                // ¹Because Xremap usually sends events one by one through evdev's "emit" function, which adds a synchronization event during each call.
+                // ²Mouse movement along the X (horizontal) axis.
+                // ³Mouse movement along the Y (vertical) axis.
             }
             Action::InputEvent(event) => self.send_event(event)?,
             Action::Command(command) => self.run_command(command),
             Action::TextExpansion { trigger_len, replacement, add_space } => {
-                // Append non-breaking space if needed (prevents Chrome from stripping)
-                let final_text = if add_space {
-                    format!("{}\u{00A0}", replacement)
-                } else {
-                    replacement.clone()
-                };
-                
                 // Delete the trigger text
                 for _ in 0..trigger_len {
                     let event = KeyEvent::new(Key::KEY_BACKSPACE, crate::event::KeyValue::Press);
@@ -52,13 +57,24 @@ impl ActionDispatcher {
                     self.on_key_event(event)?;
                 }
 
-                // Copy final text to clipboard and paste
-                if let Err(e) = crate::ahk::WaylandTextInjector::copy_to_clipboard(&final_text) {
+                // Copy replacement to clipboard and paste
+                if let Err(e) = crate::ahk::WaylandTextInjector::copy_to_clipboard(&replacement) {
                     eprintln!("Failed to copy: {}", e);
                 } else {
                     if let Err(e) = self.inject_ctrl_v() {
+                    
+                    // if let Err(e) = self.inject_paste() {
                         thread::sleep(Duration::from_millis(500));
                         eprintln!("Failed to paste: {}", e);
+                    }
+
+                    // Send space after if requested
+                    if add_space {
+                        thread::sleep(Duration::from_millis(20));
+                        let space_press = KeyEvent::new(Key::KEY_SPACE, crate::event::KeyValue::Press);
+                        self.on_key_event(space_press)?;
+                        let space_release = KeyEvent::new(Key::KEY_SPACE, crate::event::KeyValue::Release);
+                        self.on_key_event(space_release)?;
                     }
                 }
             }
@@ -79,6 +95,7 @@ impl ActionDispatcher {
         self.send_event(event)
     }
 
+    // a function that takes mouse movement events to send in a single batch, unseparated by synchronization events.
     fn send_mousemovement_event_batch(&mut self, eventbatch: Vec<RelativeEvent>) -> std::io::Result<()> {
         let mut mousemovementbatch: Vec<InputEvent> = Vec::new();
         for mouse_movement in eventbatch {
@@ -100,6 +117,7 @@ impl ActionDispatcher {
 
     fn run_command(&mut self, command: Vec<String>) {
         if !self.sigaction_set {
+            // Avoid defunct processes
             let sig_action = SigAction::new(SigHandler::SigDfl, SaFlags::SA_NOCLDWAIT, SigSet::empty());
             unsafe {
                 sigaction(signal::SIGCHLD, &sig_action).expect("Failed to register SIGCHLD handler");
@@ -143,6 +161,23 @@ impl ActionDispatcher {
     }
 
     fn inject_ctrl_v(&mut self) -> std::io::Result<()> {
+        // Press Ctrl
+        // let ctrl_press = KeyEvent::new(Key::KEY_LEFTCTRL, crate::event::KeyValue::Press);
+        // self.on_key_event(ctrl_press)?;
+
+        // // Press V
+        // let v_press = KeyEvent::new(Key::KEY_V, crate::event::KeyValue::Press);
+        // self.on_key_event(v_press)?;
+
+        // // Release V
+        // let v_release = KeyEvent::new(Key::KEY_V, crate::event::KeyValue::Release);
+        // self.on_key_event(v_release)?;
+
+        // // Release Ctrl
+        // let ctrl_release = KeyEvent::new(Key::KEY_LEFTCTRL, crate::event::KeyValue::Release);
+        // self.on_key_event(ctrl_release)?;
+
+        // Ok(())
         let ctrl_press = KeyEvent::new(Key::KEY_LEFTCTRL, crate::event::KeyValue::Press);
         self.on_key_event(ctrl_press)?;
         std::thread::sleep(std::time::Duration::from_millis(20));
@@ -161,19 +196,20 @@ impl ActionDispatcher {
         Ok(())
     }
 
-    fn inject_paste(&mut self) -> std::io::Result<()> {
-        let shift_press = KeyEvent::new(Key::KEY_LEFTSHIFT, crate::event::KeyValue::Press);
-        self.on_key_event(shift_press)?;
+fn inject_paste(&mut self) -> std::io::Result<()> {  // rename or replace inject_ctrl_v
+    let shift_press = KeyEvent::new(Key::KEY_LEFTSHIFT, crate::event::KeyValue::Press);
+    self.on_key_event(shift_press)?;
 
-        let insert_press = KeyEvent::new(Key::KEY_INSERT, crate::event::KeyValue::Press);
-        self.on_key_event(insert_press)?;
+    let insert_press = KeyEvent::new(Key::KEY_INSERT, crate::event::KeyValue::Press);
+    self.on_key_event(insert_press)?;
 
-        let insert_release = KeyEvent::new(Key::KEY_INSERT, crate::event::KeyValue::Release);
-        self.on_key_event(insert_release)?;
+    let insert_release = KeyEvent::new(Key::KEY_INSERT, crate::event::KeyValue::Release);
+    self.on_key_event(insert_release)?;
 
-        let shift_release = KeyEvent::new(Key::KEY_LEFTSHIFT, crate::event::KeyValue::Release);
-        self.on_key_event(shift_release)?;
+    let shift_release = KeyEvent::new(Key::KEY_LEFTSHIFT, crate::event::KeyValue::Release);
+    self.on_key_event(shift_release)?;
 
-        Ok(())
-    }
+    Ok(())
+}
+
 }

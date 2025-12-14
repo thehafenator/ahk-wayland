@@ -1,8 +1,24 @@
-// Transpiler will be integrated into config loading later
-// For now, just provide the structure
 use crate::ahk::types::*;
+use crate::hotstring::HotstringMatch;
 
 pub fn transpile_to_xremap(_ahk: AhkConfig) -> AhkConfig {
-    // Placeholder - will integrate with xremap's config system
     _ahk
+}
+
+pub fn extract_hotstrings(ahk: &AhkConfig) -> Vec<HotstringMatch> {
+    ahk.hotstrings
+        .iter()
+        .enumerate()
+        .map(|(idx, hs)| {
+            HotstringMatch::from_trigger(
+                idx,
+                &hs.trigger,
+                hs.replacement.clone(),
+                hs.immediate,
+                hs.case_sensitive,
+                hs.omit_char,
+                hs.execute,
+            )
+        })
+        .collect()
 }

@@ -9,7 +9,6 @@ use client::build_client;
 use config::{config_watcher, load_configs};
 use device::InputDevice;
 use event::Event;
-use xremap::ahk;
 use nix::libc::ENODEV;
 use nix::sys::inotify::{AddWatchFlags, Inotify, InotifyEvent};
 use nix::sys::select::select;
@@ -20,14 +19,8 @@ use std::io::stdout;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::PathBuf;
 use std::time::Duration;
+use xremap::{action_dispatcher, client, config, device, event, event_handler};
 
-mod action;
-mod action_dispatcher;
-mod client;
-mod config;
-mod device;
-mod event;
-mod event_handler;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

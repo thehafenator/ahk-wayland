@@ -1,3 +1,4 @@
+use crate::hotstring;
 use crate::action::Action;
 use crate::client::WMClient;
 use crate::config::application::OnlyOrNot;
@@ -8,7 +9,6 @@ use crate::config::modmap_action::{Keys, ModmapAction, MultiPurposeKey, PressRel
 use crate::config::remap::Remap;
 use crate::device::InputDeviceInfo;
 use crate::event::{Event, KeyEvent, RelativeEvent};
-use crate::hotstring;
 use crate::{config, Config};
 use evdev::KeyCode as Key;
 use lazy_static::lazy_static;
@@ -117,122 +117,7 @@ impl EventHandler {
     }
 
     // Handle EventType::KEY
-
-    // Convert key code to character for hotstring matching
-    // Returns: Some(char) for valid characters, None for keys that should reset matcher
-    fn key_to_char(&mut self, key: &Key) -> Option<String> {
-        match *key {
-            // Letters
-            Key::KEY_A => Some("a".to_string()),
-            Key::KEY_B => Some("b".to_string()),
-            Key::KEY_C => Some("c".to_string()),
-            Key::KEY_D => Some("d".to_string()),
-            Key::KEY_E => Some("e".to_string()),
-            Key::KEY_F => Some("f".to_string()),
-            Key::KEY_G => Some("g".to_string()),
-            Key::KEY_H => Some("h".to_string()),
-            Key::KEY_I => Some("i".to_string()),
-            Key::KEY_J => Some("j".to_string()),
-            Key::KEY_K => Some("k".to_string()),
-            Key::KEY_L => Some("l".to_string()),
-            Key::KEY_M => Some("m".to_string()),
-            Key::KEY_N => Some("n".to_string()),
-            Key::KEY_O => Some("o".to_string()),
-            Key::KEY_P => Some("p".to_string()),
-            Key::KEY_Q => Some("q".to_string()),
-            Key::KEY_R => Some("r".to_string()),
-            Key::KEY_S => Some("s".to_string()),
-            Key::KEY_T => Some("t".to_string()),
-            Key::KEY_U => Some("u".to_string()),
-            Key::KEY_V => Some("v".to_string()),
-            Key::KEY_W => Some("w".to_string()),
-            Key::KEY_X => Some("x".to_string()),
-            Key::KEY_Y => Some("y".to_string()),
-            Key::KEY_Z => Some("z".to_string()),
-
-            // Numbers
-            Key::KEY_0 => Some("0".to_string()),
-            Key::KEY_1 => Some("1".to_string()),
-            Key::KEY_2 => Some("2".to_string()),
-            Key::KEY_3 => Some("3".to_string()),
-            Key::KEY_4 => Some("4".to_string()),
-            Key::KEY_5 => Some("5".to_string()),
-            Key::KEY_6 => Some("6".to_string()),
-            Key::KEY_7 => Some("7".to_string()),
-            Key::KEY_8 => Some("8".to_string()),
-            Key::KEY_9 => Some("9".to_string()),
-
-            // Punctuation
-            Key::KEY_DOT => Some(".".to_string()),
-            Key::KEY_COMMA => Some(",".to_string()),
-            Key::KEY_SEMICOLON => Some(";".to_string()),
-            Key::KEY_SLASH => Some("/".to_string()),
-            Key::KEY_APOSTROPHE => Some("'".to_string()),
-            Key::KEY_MINUS => Some("-".to_string()),
-            Key::KEY_EQUAL => Some("=".to_string()),
-            Key::KEY_LEFTBRACE => Some("[".to_string()),
-            Key::KEY_RIGHTBRACE => Some("]".to_string()),
-            Key::KEY_BACKSLASH => Some("\\".to_string()),
-            Key::KEY_GRAVE => Some("`".to_string()),
-
-            // Whitespace
-            Key::KEY_SPACE => Some(" ".to_string()),
-            Key::KEY_TAB => Some("\t".to_string()),
-            Key::KEY_ENTER => Some("\n".to_string()),
-
-            // Backspace - remove from buffer
-            Key::KEY_BACKSPACE => {
-                self.hotstring_state = None;
-                self.hotstring_buffer.clear();
-                if !self.hotstring_buffer.is_empty() {
-                    self.hotstring_buffer.pop();
-                }
-                None
-            }
-
-            // These keys should reset the matcher (return None)
-            // Modifiers
-            Key::KEY_LEFTSHIFT
-            | Key::KEY_RIGHTSHIFT
-            | Key::KEY_LEFTCTRL
-            | Key::KEY_RIGHTCTRL
-            | Key::KEY_LEFTALT
-            | Key::KEY_RIGHTALT
-            | Key::KEY_LEFTMETA
-            | Key::KEY_RIGHTMETA => None,
-
-            // Navigation keys - these should reset
-            Key::KEY_UP
-            | Key::KEY_DOWN
-            | Key::KEY_LEFT
-            | Key::KEY_RIGHT
-            | Key::KEY_HOME
-            | Key::KEY_END
-            | Key::KEY_PAGEUP
-            | Key::KEY_PAGEDOWN => None,
-
-            // Function keys - reset
-            Key::KEY_F1
-            | Key::KEY_F2
-            | Key::KEY_F3
-            | Key::KEY_F4
-            | Key::KEY_F5
-            | Key::KEY_F6
-            | Key::KEY_F7
-            | Key::KEY_F8
-            | Key::KEY_F9
-            | Key::KEY_F10
-            | Key::KEY_F11
-            | Key::KEY_F12 => None,
-
-            // Other control keys - reset
-            Key::KEY_ESC | Key::KEY_DELETE | Key::KEY_INSERT | Key::KEY_CAPSLOCK => None,
-
-            _ => None,
-        }
-    }
-
-      fn on_key_event(
+    fn on_key_event(
         &mut self,
         event: &KeyEvent,
         config: &Config,
@@ -258,109 +143,39 @@ impl EventHandler {
         }
 
         let mut send_original_relative_event = false;
-
         // Apply keymap
         for (key, value) in key_values.into_iter() {
-    // Handle virtual modifiers
-    if config.virtual_modifiers.contains(&key) {
-        self.update_modifier(key, value);
-        continue;
-    }
-    
-    // Handle real modifier keys - update state AND send the key
-    if MODIFIER_KEYS.contains(&key) {
-        self.update_modifier(key, value);
-        self.send_key(&key, value);
-        continue;
-    }
-    
-    // Handle non-modifier keys
-    if is_pressed(value) {
+            if config.virtual_modifiers.contains(&key) {
+                self.update_modifier(key, value);
+                continue;
+            } else if MODIFIER_KEYS.contains(&key) {
+                self.update_modifier(key, value);
+            } else if is_pressed(value) {
                 if self.escape_next_key {
-                    self.escape_next_key = false;
-                }
-
-                // === 1. FIRST: Check regular hotkeys (including ^t, Ctrl+anything, etc.) ===
-                else if let Some(actions) = self.find_keymap(config, &key, device)? {
+                    self.escape_next_key = false
+                } else if let Some(actions) = self.find_keymap(config, &key, device)? {
                     self.dispatch_actions(&actions, &key)?;
                     continue;
-                }
-                if let Some(actions) = self.find_keymap(config, &KEY_MATCH_ANY, device)? {
+                } else if let Some(actions) = self.find_keymap(config, &KEY_MATCH_ANY, device)? {
                     self.dispatch_actions(&actions, &KEY_MATCH_ANY)?;
                     continue;
                 }
-
-                // === 2. SECOND: Only if no hotkey matched — process hotstrings ===
-                if let Some(matcher) = &config.hotstring_matcher {
-                    match self.key_to_char(&key) {
-                        Some(ch) => {
-                            // Valid character - process through matcher
-                            self.hotstring_buffer.push_str(&ch);
-                            let (new_state, matched) = matcher.process(self.hotstring_state.as_ref(), &ch);
-                            self.hotstring_state = Some(new_state);
-
-                            if let Some(hotstring_match) = matched {
-                                // Delete just the trigger
-                                let chars_to_delete = hotstring_match.trigger.len();
-
-                                if hotstring_match.execute {
-                                    // X option: execute as command
-                                    for _ in 0..chars_to_delete {
-                                        self.send_key(&Key::KEY_BACKSPACE, PRESS);
-                                        self.send_key(&Key::KEY_BACKSPACE, RELEASE);
-                                    }
-
-                                    if let Some(rest) = hotstring_match.replacement.strip_prefix("Run(") {
-                                        if let Some(cmd) = rest.strip_suffix(')') {
-                                            let cmd = cmd.trim().trim_matches(|c| c == '"' || c == '\'');
-                                            let command: Vec<String> = if cmd.starts_with("http://") || cmd.starts_with("https://") {
-                                                vec!["xdg-open".to_string(), cmd.to_string()]
-                                            } else {
-                                                cmd.split_whitespace().map(String::from).collect()
-                                            };
-                                            self.send_action(Action::Command(command));
-                                        }
-                                    }
-                                } else {
-                                    // Regular text expansion
-                                    let final_replacement = hotstring_match.replacement.clone();
-                                    self.send_action(Action::TextExpansion {
-                                        trigger_len: chars_to_delete,
-                                        replacement: final_replacement,
-                                        add_space: !hotstring_match.omit_char && !hotstring_match.immediate,
-                                    });
-                                }
-
-                                self.hotstring_buffer.clear();
-                                self.hotstring_state = None;
-                                continue; // hotstring matched — suppress original key
-                            }
-                        }
-                        None => {
-                            // Reset matcher on non-character keys
-                            self.hotstring_state = None;
-                            self.hotstring_buffer.clear();
-                        }
-                    }
-                }
-
-                // If nothing matched above, pass through the original key
-                self.send_key(&key, value);
-            } else {
-                // Release or repeat — just send
-                self.send_key(&key, value);
             }
-
-            // Check for disguised relative events
+            // checking if there's a "disguised" key version of a relative event,
+            // (scancodes equal to and over DISGUISED_EVENT_OFFSETTER are only "disguised" custom events)
+            // and also if it's the same "key" and value as the one that came in.
             if key.code() >= DISGUISED_EVENT_OFFSETTER && (key.code(), value) == (event.code(), event.value()) {
+                // if it is, setting send_original_relative_event to true to later tell on_relative_event to send the original event.
                 send_original_relative_event = true;
                 continue;
             }
+            self.send_key(&key, value);
         }
 
+        // Using the Ok() to send a boolean to on_relative_event, which will be used to decide whether to send the original relative event.
+        // (True = send the original relative event, false = don't send it.)
         Ok(send_original_relative_event)
     }
-
 
     // Handle EventType::RELATIVE
     fn on_relative_event(
@@ -1106,20 +921,34 @@ impl MultiPurposeKeyState {
 /// Unfortunately the underlying type doesn't allow direct
 /// comparison, but that's ok for our purposes.
 fn modifiers_first(a: &Key, b: &Key) -> Ordering {
+
     if MODIFIER_KEYS.contains(a) {
+
         if MODIFIER_KEYS.contains(b) {
+
             Ordering::Equal
+
         } else {
+
             Ordering::Less
+
         }
+
     } else if MODIFIER_KEYS.contains(b) {
+
         Ordering::Greater
+
     } else {
+
         // Neither are modifiers
+
         Ordering::Equal
+
     }
+
 }
 
 fn modifiers_last(a: &Key, b: &Key) -> Ordering {
     modifiers_first(a, b).reverse()
 }
+

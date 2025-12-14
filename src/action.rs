@@ -20,4 +20,10 @@ pub enum Action {
     Command(Vec<String>),
     // keypress_delay_ms
     Delay(Duration),
+    // Text expansion via clipboard for hotstrings
+    TextExpansion {
+        trigger_len: usize,
+        replacement: String,
+        add_space: bool,
+    },
 }

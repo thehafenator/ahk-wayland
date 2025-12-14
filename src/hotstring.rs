@@ -1,0 +1,182 @@
+// Hotstring matching for text expansion
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RollingItem {
+    WordSeparator,
+    Char(String),
+    CharInsensitive(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct HotstringMatch {
+    pub id: usize,
+    pub trigger: String,
+    pub replacement: String,
+    pub items: Vec<RollingItem>,
+    pub immediate: bool,
+    pub case_sensitive: bool,
+    pub omit_char: bool, // NEW
+    pub execute: bool,   // NEW
+}
+
+impl HotstringMatch {
+    pub fn from_trigger(
+        id: usize,
+        trigger: &str,
+        replacement: String,
+        immediate: bool,
+        case_sensitive: bool,
+        omit_char: bool,
+        execute: bool,
+    ) -> Self {
+        let mut items = Vec::new();
+
+        // For non-immediate hotstrings, require word boundaries on both sides
+        // Left word boundary: must be preceded by separator or start of input
+        if !immediate {
+            items.push(RollingItem::WordSeparator);
+        }
+
+        // Add trigger characters
+        for c in trigger.chars() {
+            if case_sensitive {
+                items.push(RollingItem::Char(c.to_string()));
+            } else {
+                items.push(RollingItem::CharInsensitive(c.to_string()));
+            }
+        }
+
+        // Right word boundary: must be followed by separator to trigger
+        if !immediate {
+            items.push(RollingItem::WordSeparator);
+        }
+
+        Self {
+            id,
+            trigger: trigger.to_string(),
+            replacement,
+            items,
+            immediate,
+            case_sensitive,
+            omit_char,
+            execute,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct HotstringMatcherState {
+    paths: Vec<HotstringPath>,
+}
+
+#[derive(Clone)]
+struct HotstringPath {
+    item_index: usize,
+    match_id: usize,
+    chars_matched: String,
+}
+
+#[derive(Debug)]
+pub struct HotstringMatcher {
+    matches: Vec<HotstringMatch>,
+    word_separators: Vec<String>,
+}
+
+impl HotstringMatcher {
+    pub fn new(matches: Vec<HotstringMatch>) -> Self {
+        Self {
+            matches,
+            word_separators: vec![
+                " ".to_string(),
+                "\t".to_string(),
+                "\n".to_string(),
+                ".".to_string(),
+                ",".to_string(),
+            ],
+        }
+    }
+
+    pub fn process(
+        &self,
+        prev_state: Option<&HotstringMatcherState>,
+        char: &str,
+    ) -> (HotstringMatcherState, Option<&HotstringMatch>) {
+        let mut new_paths = Vec::new();
+
+        let is_word_sep = self.word_separators.contains(&char.to_string());
+
+        if let Some(state) = prev_state {
+            for path in &state.paths {
+                let m = &self.matches[path.match_id];
+                if path.item_index < m.items.len() {
+                    let item = &m.items[path.item_index];
+                    let matches = match item {
+                        RollingItem::WordSeparator => is_word_sep,
+                        RollingItem::Char(c) => c == char,
+                        RollingItem::CharInsensitive(c) => c.eq_ignore_ascii_case(char),
+                    };
+
+                    if matches {
+                        let next_index = path.item_index + 1;
+                        let mut new_chars = path.chars_matched.clone();
+                        new_chars.push_str(char);
+
+                        if next_index >= m.items.len() {
+                            return (HotstringMatcherState { paths: vec![] }, Some(m));
+                        }
+
+                        new_paths.push(HotstringPath {
+                            item_index: next_index,
+                            match_id: path.match_id,
+                            chars_matched: new_chars,
+                        });
+                    }
+                }
+            }
+        }
+
+        for (idx, m) in self.matches.iter().enumerate() {
+            if !m.items.is_empty() {
+                let mut start_index = 0;
+
+                // If first item is WordSeparator (left boundary marker)
+                if matches!(m.items[0], RollingItem::WordSeparator) {
+                    if prev_state.is_none() {
+                        // At start of input - boundary satisfied, skip to trigger chars
+                        start_index = 1;
+                    } else if is_word_sep {
+                        // Current char is separator - boundary satisfied, skip to trigger chars
+                        start_index = 1;
+                    } else {
+                        // In middle of word - boundary not satisfied
+                        continue;
+                    }
+                }
+
+                if start_index >= m.items.len() {
+                    continue;
+                }
+
+                let first_item = &m.items[start_index];
+                let matches = match first_item {
+                    RollingItem::WordSeparator => is_word_sep,
+                    RollingItem::Char(c) => c == char,
+                    RollingItem::CharInsensitive(c) => c.eq_ignore_ascii_case(char),
+                };
+
+                if matches {
+                    if start_index + 1 >= m.items.len() {
+                        return (HotstringMatcherState { paths: vec![] }, Some(m));
+                    }
+                    new_paths.push(HotstringPath {
+                        item_index: start_index + 1,
+                        match_id: idx,
+                        chars_matched: char.to_string(),
+                    });
+                }
+            }
+        }
+
+        (HotstringMatcherState { paths: new_paths }, None)
+    }
+}

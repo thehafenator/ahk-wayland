@@ -21,9 +21,10 @@ pub struct AhkHotstring {
     pub replacement: String,
     pub immediate: bool,
     pub case_sensitive: bool,
+    pub omit_char: bool,
+    pub execute: bool,
     pub context: Option<String>,
 }
-
 #[derive(Debug, Clone)]
 pub enum AhkAction {
     Run(Vec<String>),
