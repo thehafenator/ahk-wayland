@@ -41,6 +41,8 @@ pub enum KeymapAction {
     // Internals
     #[serde(skip)]
     SetExtraModifiers(Vec<Key>),
+    #[serde(skip)]
+    AhkInterpreted(crate::ahk::types::AhkAction),
 }
 
 fn deserialize_key_press<'de, D>(deserializer: D) -> Result<Key, D::Error>
@@ -258,3 +260,5 @@ mod tests {
         }
     }
 }
+
+

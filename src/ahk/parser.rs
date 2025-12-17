@@ -13,7 +13,6 @@ fn unescape_ahk_string(s: &str) -> String {
 
     while let Some(ch) = chars.next() {
         if ch == '`' {
-            // AHK escape character
             if let Some(&next) = chars.peek() {
                 chars.next();
                 match next {
@@ -46,52 +45,227 @@ impl AhkParser {
         }
     }
 
-pub fn parse_file(&mut self, content: &str) -> Result<AhkConfig, String> {
+    fn parse_window_criteria(&self, content: &str) -> Result<WindowCriteria, String> {
+        let content = content.trim().trim_matches(|c| c == '"' || c == '\'');
+        
+        if let Some(exe) = content.strip_prefix("ahk_exe ") {
+            Ok(WindowCriteria::Exe(exe.trim().to_string()))
+        } else if let Some(class) = content.strip_prefix("ahk_class ") {
+            Ok(WindowCriteria::Class(class.trim().to_string()))
+        } else {
+            // Default to title match if no prefix
+            Ok(WindowCriteria::Title(content.to_string()))
+        }
+    }
+
+    pub fn parse_file(&mut self, content: &str) -> Result<AhkConfig, String> {
         let mut hotkeys = Vec::new();
         let mut hotstrings = Vec::new();
         let mut current_context = None;
 
-for line in content.lines() {
-    let line = line.trim();
+        let mut lines = content.lines().enumerate().peekable();
 
-    if line.is_empty() || line.starts_with(';') {
-        continue;
-    }
+        while let Some((_line_num, line)) = lines.next() {
+            let line = line.trim();
 
-    if line.starts_with("#HotIf") {
-        current_context = self.parse_hotif(line)?;
-        continue;
-    }
+            if line.is_empty() || line.starts_with(';') {
+                continue;
+            }
 
-    if line == "#HotIf" {
-        current_context = None;
-        continue;
-    }
+            if line.starts_with("#HotIf") {
+                current_context = self.parse_hotif(line)?;
+                continue;
+            }
 
-    // First: try to parse as hotkey (lines with exactly one :: and modifier/key on left)
-    if line.contains("::") && !line.starts_with(':') && line.matches("::").count() == 1 {
-        if let Some(hotkey) = self.parse_hotkey(line, current_context.clone())? {
-            hotkeys.push(hotkey);
-            continue;
+            if line == "#HotIf" {
+                current_context = None;
+                continue;
+            }
+
+            if line.starts_with(':') {
+                if let Some(hotstring) = self.parse_hotstring(line, current_context.clone())? {
+                    hotstrings.push(hotstring);
+                    continue;
+                } else {
+                    return Err(format!("Failed to parse hotstring line: {}", line));
+                }
+            }
+
+            if line.contains("::") {
+                // Check if multiline block
+                if line.ends_with("::{") || lines.peek().map(|(_, l)| l.trim()) == Some("{") {
+                    // Consume opening brace if on next line
+                    if !line.ends_with("::{") {
+                        lines.next(); // consume the '{'
+                    }
+                    
+                    let hotkey_def = if line.ends_with("::{") {
+                        line.trim_end_matches('{').trim()
+                    } else {
+                        line
+                    };
+                    
+                    if let Some(hotkey) = self.parse_multiline_hotkey(hotkey_def, &mut lines, current_context.clone())? {
+                        hotkeys.push(hotkey);
+                    }
+                } else {
+                    // Single-line hotkey
+                    if let Some(hotkey) = self.parse_hotkey(line, current_context.clone())? {
+                        hotkeys.push(hotkey);
+                    } else {
+                        return Err(format!("Failed to parse hotkey line: {}", line));
+                    }
+                }
+            }
         }
-    }
-
-    // Second: try to parse as hotstring (starts with : or has options)
-    if let Some(hotstring) = self.parse_hotstring(line, current_context.clone())? {
-        hotstrings.push(hotstring);
-        continue;
-    }
-
-    // Fallback: if it has :: but didn't match above, treat as hotkey
-    if line.contains("::") {
-        if let Some(hotkey) = self.parse_hotkey(line, current_context.clone())? {
-            hotkeys.push(hotkey);
-        }
-    }
-}
 
         Ok(AhkConfig { hotkeys, hotstrings })
     }
+
+  
+fn parse_block_actions<'a>(
+    &self,
+    lines: &mut impl Iterator<Item = (usize, &'a str)>,
+) -> Result<Vec<AhkAction>, String> {
+    let mut actions = Vec::new();
+    let mut depth = 1;
+    
+    while let Some((_, line)) = lines.next() {
+        let trimmed = line.trim();
+        
+        if trimmed.is_empty() || trimmed.starts_with(';') {
+            continue;
+        }
+        
+        if trimmed == "}" {
+            depth -= 1;
+            if depth == 0 {
+                break;
+            }
+            continue;
+        }
+        
+        if trimmed == "{" {
+            depth += 1;
+            continue;
+        }
+        
+        // Handle nested If blocks (recursive)
+        if trimmed.starts_with("If WinActive(") || trimmed.starts_with("If !WinActive(") {
+            let is_negated = trimmed.starts_with("If !");
+            let prefix = if is_negated { "If !WinActive(" } else { "If WinActive(" };
+            
+            if let Some(rest) = trimmed.strip_prefix(prefix) {
+                if let Some(criteria_str) = rest.strip_suffix("){")
+                    .or_else(|| rest.strip_suffix(") {"))
+                    .or_else(|| rest.strip_suffix(")")) 
+                {
+                    let criteria = self.parse_window_criteria(criteria_str)?;
+                    
+                    let block_on_same_line = trimmed.ends_with("){") || trimmed.ends_with(") {");
+                    if !block_on_same_line {
+                        if let Some((_, next)) = lines.next() {
+                            if next.trim() != "{" {
+                                return Err("Expected '{' after If condition".to_string());
+                            }
+                        }
+                    }
+                    
+                    // Recursively parse then block
+                    let then_actions = self.parse_block_actions(lines)?;
+                    
+                    // Check for else
+                    let mut else_actions = None;
+                    
+                    // Peek at next non-empty line
+                    while let Some((_idx, line)) = lines.next() {
+                        let peek = line.trim();
+                        if peek.is_empty() || peek.starts_with(';') {
+                            continue;
+                        }
+                        
+                        if peek.starts_with("else") {
+                            // Consume opening brace
+                            let has_brace = peek.contains('{');
+                            if !has_brace {
+                                if let Some((_, brace_line)) = lines.next() {
+                                    if brace_line.trim() != "{" {
+                                        return Err("Expected '{' after else".to_string());
+                                    }
+                                }
+                            }
+                            else_actions = Some(self.parse_block_actions(lines)?);
+                        } else {
+                            // Not an else, this line belongs to outer scope
+                            // We can't put it back, so try to parse it
+                            if let Ok(action) = self.parse_action(peek) {
+                                actions.push(action);
+                            }
+                        }
+                        break;
+                    }
+                    
+                    let action = if is_negated {
+                        AhkAction::IfWinActive {
+                            criteria,
+                            then_actions: vec![],
+                            else_actions: Some(then_actions),
+                        }
+                    } else {
+                        AhkAction::IfWinActive {
+                            criteria,
+                            then_actions,
+                            else_actions,
+                        }
+                    };
+                    
+                    actions.push(action);
+                    continue;
+                }
+            }
+        }
+        
+        // Handle Shell{} blocks
+        if trimmed.starts_with("Shell{") || trimmed.starts_with("shell{") {
+            let mut shell_lines = Vec::new();
+            let first_line = trimmed.strip_prefix("Shell{")
+                .or_else(|| trimmed.strip_prefix("shell{"))
+                .unwrap()
+                .trim();
+            
+            if first_line.ends_with('}') {
+                let content = first_line.trim_end_matches('}').trim();
+                if !content.is_empty() {
+                    actions.push(AhkAction::Shell(content.to_string()));
+                }
+            } else {
+                if !first_line.is_empty() {
+                    shell_lines.push(first_line.to_string());
+                }
+                
+                while let Some((_, shell_line)) = lines.next() {
+                    let shell_trimmed = shell_line.trim();
+                    if shell_trimmed == "}" {
+                        break;
+                    }
+                    shell_lines.push(shell_line.to_string());
+                }
+                
+                if !shell_lines.is_empty() {
+                    actions.push(AhkAction::Shell(shell_lines.join("\n")));
+                }
+            }
+            continue;
+        }
+        
+        // Parse regular action
+        if let Ok(action) = self.parse_action(trimmed) {
+            actions.push(action);
+        }
+    }
+    
+    Ok(actions)
+}
 
     fn parse_hotif(&mut self, line: &str) -> Result<Option<String>, String> {
         let re = Regex::new(r#"#HotIf\s+(.+)"#).unwrap();
@@ -133,7 +307,6 @@ for line in content.lines() {
         let hotkey_def = parts[0].trim();
         let action_str = parts[1].trim();
 
-        // Only strip comments if semicolon is preceded by whitespace (not inside quotes)
         let action_str = if let Some(comment_pos) = action_str.find(" ;") {
             &action_str[..comment_pos]
         } else {
@@ -203,9 +376,249 @@ for line in content.lines() {
         Ok((modifiers, key, is_wildcard))
     }
 
+    fn parse_multiline_hotkey<'a>(
+    &self,
+    hotkey_def: &str,
+    lines: &mut impl Iterator<Item = (usize, &'a str)>,
+    context: Option<String>,
+) -> Result<Option<AhkHotkey>, String> {
+    let parts: Vec<&str> = hotkey_def.splitn(2, "::").collect();
+    if parts.len() != 2 {
+        return Ok(None);
+    }
+
+    let (modifiers, key, is_wildcard) = self.parse_key_combo(parts[0].trim())?;
+    
+    // Collect block lines
+    let mut actions = Vec::new();
+    let mut depth = 1; // Already inside one brace level
+    
+    while let Some((_, line)) = lines.next() {
+        let trimmed = line.trim();
+        
+        if trimmed.is_empty() || trimmed.starts_with(';') {
+            continue;
+        }
+        
+        // Handle If WinActive() blocks
+        if trimmed.starts_with("If WinActive(") || trimmed.starts_with("If !WinActive(") {
+            eprintln!("DEBUG PARSER: Found If WinActive line: {}", trimmed);
+            let is_negated = trimmed.starts_with("If !");
+            let prefix = if is_negated { "If !WinActive(" } else { "If WinActive(" };
+            
+            if let Some(rest) = trimmed.strip_prefix(prefix) {
+                eprintln!("DEBUG PARSER: Stripped prefix, rest: {}", rest);
+                if let Some(criteria_str) = rest.strip_suffix("){")
+                    .or_else(|| rest.strip_suffix(") {"))
+                    .or_else(|| rest.strip_suffix(")")) 
+                {
+                    eprintln!("DEBUG PARSER: Parsed criteria string: {}", criteria_str);
+                    let criteria = self.parse_window_criteria(criteria_str)?;
+                    eprintln!("DEBUG PARSER: Parsed criteria: {:?}", criteria);
+                    
+                    // Check if block starts on same line or next line
+                    let block_on_same_line = trimmed.ends_with("){") || trimmed.ends_with(") {");
+                    eprintln!("DEBUG PARSER: block_on_same_line: {}", block_on_same_line);
+                    if !block_on_same_line {
+                        // Consume the opening brace
+                        if let Some((_, next)) = lines.next() {
+                            eprintln!("DEBUG PARSER: Next line: {}", next.trim());
+                            if next.trim() != "{" {
+                                return Err("Expected '{' after If condition".to_string());
+                            }
+                        }
+                    }
+                    
+                    // Collect then_actions until we hit }
+                    eprintln!("DEBUG PARSER: About to parse then_actions block");
+                    let then_actions = self.parse_block_actions(&mut *lines)?;
+                    eprintln!("DEBUG PARSER: Parsed {} then_actions", then_actions.len());
+                    
+                    // Check for else block
+                    let mut else_actions = None;
+                    
+                    // Peek ahead to see if there's an else
+                    eprintln!("DEBUG PARSER: Looking for else block");
+                    
+                    while let Some((_idx, line)) = lines.next() {
+                        let peek_trimmed = line.trim();
+                        eprintln!("DEBUG PARSER: Checking line for else: '{}'", peek_trimmed);
+                        
+                        if peek_trimmed.is_empty() || peek_trimmed.starts_with(';') {
+                            continue;
+                        }
+                        
+                        if peek_trimmed.starts_with("else") {
+                            eprintln!("DEBUG PARSER: Found else block!");
+                            
+                            // Consume opening brace
+                            let has_brace = peek_trimmed.contains('{');
+                            eprintln!("DEBUG PARSER: else has_brace: {}", has_brace);
+                            if !has_brace {
+                                if let Some((_, brace_line)) = lines.next() {
+                                    eprintln!("DEBUG PARSER: else next line: {}", brace_line.trim());
+                                    if brace_line.trim() != "{" {
+                                        return Err("Expected '{' after else".to_string());
+                                    }
+                                }
+                            }
+                            
+                            eprintln!("DEBUG PARSER: About to parse else_actions block");
+                            else_actions = Some(self.parse_block_actions(&mut *lines)?);
+                            eprintln!("DEBUG PARSER: Parsed {} else_actions", else_actions.as_ref().unwrap().len());
+                            break;
+                        } else {
+                            eprintln!("DEBUG PARSER: Not an else, breaking");
+                            // Not an else, this is the next statement - we're done with If
+                            // We need to process this line, but we can't put it back
+                            // For now, try to parse it as an action
+if let Ok(_action) = self.parse_action(peek_trimmed) {
+                                // Store it to be added after the If block
+                                // This is a limitation - we'll lose this line
+                            }
+                            break;
+                        }
+                    }
+                    
+                    // Create IfWinActive action (handle negation)
+                    let action = if is_negated {
+                        eprintln!("DEBUG PARSER: Creating negated IfWinActive");
+                        AhkAction::IfWinActive {
+                            criteria,
+                            then_actions: vec![],
+                            else_actions: Some(then_actions),
+                        }
+                    } else {
+                        eprintln!("DEBUG PARSER: Creating normal IfWinActive with else={:?}", else_actions.is_some());
+                        AhkAction::IfWinActive {
+                            criteria,
+                            then_actions,
+                            else_actions,
+                        }
+                    };
+                    
+                    eprintln!("DEBUG PARSER: Pushing IfWinActive action to actions list");
+                    actions.push(action);
+                    continue;
+                }
+            }
+        }
+        
+        // Handle Shell{} blocks
+        if trimmed.starts_with("Shell{") || trimmed.starts_with("shell{") {
+            let mut shell_lines = Vec::new();
+            let first_line = trimmed.strip_prefix("Shell{")
+                .or_else(|| trimmed.strip_prefix("shell{"))
+                .unwrap()
+                .trim();
+            
+            if first_line.ends_with('}') {
+                // Single-line Shell{}
+                let content = first_line.trim_end_matches('}').trim();
+                if !content.is_empty() {
+                    actions.push(AhkAction::Shell(content.to_string()));
+                }
+            } else {
+                // Multiline Shell{}
+                if !first_line.is_empty() {
+                    shell_lines.push(first_line.to_string());
+                }
+                
+                while let Some((_, shell_line)) = lines.next() {
+                    let shell_trimmed = shell_line.trim();
+                    if shell_trimmed == "}" {
+                        break;
+                    }
+                    shell_lines.push(shell_line.to_string());
+                }
+                
+                if !shell_lines.is_empty() {
+                    actions.push(AhkAction::Shell(shell_lines.join("\n")));
+                }
+            }
+            continue;
+        }
+        
+        if trimmed == "}" {
+            depth -= 1;
+            if depth == 0 {
+                break;
+            }
+        }
+        
+        if trimmed == "{" {
+            depth += 1;
+            continue;
+        }
+        
+        // Parse individual action
+        if let Ok(action) = self.parse_action(trimmed) {
+            actions.push(action);
+        }
+    }
+    
+    eprintln!("DEBUG PARSER: Finished parsing hotkey, total actions: {}", actions.len());
+    for (i, action) in actions.iter().enumerate() {
+        eprintln!("DEBUG PARSER: Action {}: {:?}", i, action);
+    }
+    
+    let action = if actions.len() == 1 {
+        actions.into_iter().next().unwrap()
+    } else {
+        AhkAction::Block(actions)
+    };
+    
+    Ok(Some(AhkHotkey {
+        modifiers,
+        key,
+        action,
+        context,
+        is_wildcard,
+    }))
+}
+
     fn parse_action(&self, action_str: &str) -> Result<AhkAction, String> {
         let s = action_str.trim();
 
+        // Handle WinActivate
+        if let Some(rest) = s.strip_prefix("WinActivate(") {
+            if let Some(content) = rest.strip_suffix(')') {
+                let criteria = self.parse_window_criteria(content)?;
+                return Ok(AhkAction::WinActivate(criteria));
+            }
+        }
+
+        // Handle WinWaitActive with optional timeout: WinWaitActive("criteria", timeout_ms)
+        if let Some(rest) = s.strip_prefix("WinWaitActive(") {
+            if let Some(content) = rest.strip_suffix(')') {
+                let parts: Vec<&str> = content.split(',').map(|s| s.trim()).collect();
+                let criteria = self.parse_window_criteria(parts[0])?;
+                let timeout_ms = if parts.len() > 1 {
+                    parts[1].parse::<u64>().ok()
+                } else {
+                    None // None = infinite wait
+                };
+                return Ok(AhkAction::WinWaitActive { criteria, timeout_ms });
+            }
+        }
+
+        // Handle WinClose
+        if let Some(rest) = s.strip_prefix("WinClose(") {
+            if let Some(content) = rest.strip_suffix(')') {
+                let criteria = self.parse_window_criteria(content)?;
+                return Ok(AhkAction::WinClose(criteria));
+            }
+        }
+
+        // Handle Run with space: Run "command" or Run 'command'
+        if let Some(rest) = s.strip_prefix("Run ") {
+            let cmd = rest.trim().trim_matches(|c| c == '"' || c == '\'');
+            let cmd = unescape_ahk_string(cmd);
+            let parts: Vec<String> = cmd.split_whitespace().map(String::from).collect();
+            return Ok(AhkAction::Run(parts));
+        }
+
+        // Handle Run with parentheses: Run("command")
         if let Some(rest) = s.strip_prefix("Run(") {
             if let Some(cmd) = rest.strip_suffix(')') {
                 let cmd = cmd.trim().trim_matches(|c| c == '"' || c == '\'');
@@ -215,7 +628,6 @@ for line in content.lines() {
             }
         }
 
-        // Handle Send with parentheses: Send("text") or SendInput("text") or SendEvent("text")
         for prefix in ["SendInput(", "SendEvent(", "Send("] {
             if let Some(rest) = s.strip_prefix(prefix) {
                 if let Some(content) = rest.strip_suffix(')') {
@@ -226,7 +638,6 @@ for line in content.lines() {
             }
         }
 
-        // Handle Send with space: Send "text"
         for prefix in ["SendInput ", "SendEvent ", "Send "] {
             if let Some(rest) = s.strip_prefix(prefix) {
                 let keys = rest.trim_matches(|c| c == '"' || c == '\'');

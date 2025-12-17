@@ -9,7 +9,7 @@ use crate::config::remap::Remap;
 use crate::device::InputDeviceInfo;
 use crate::event::{Event, KeyEvent, RelativeEvent};
 use crate::hotstring;
-use crate::{config, Config};
+use crate::Config;
 use evdev::KeyCode as Key;
 use lazy_static::lazy_static;
 use log::debug;
@@ -232,7 +232,7 @@ impl EventHandler {
         }
     }
 
-      fn on_key_event(
+    fn on_key_event(
         &mut self,
         event: &KeyEvent,
         config: &Config,
@@ -241,6 +241,7 @@ impl EventHandler {
         self.application_cache = None; // expire cache
         self.title_cache = None; // expire cache
         let key = Key::new(event.code());
+        println!("Looking for key: {:?}, modifiers: {:?}", key, self.modifiers);
 
         if key.code() < DISGUISED_EVENT_OFFSETTER {
             debug!("=> {}: {:?}", event.value(), &key);
@@ -261,21 +262,21 @@ impl EventHandler {
 
         // Apply keymap
         for (key, value) in key_values.into_iter() {
-    // Handle virtual modifiers
-    if config.virtual_modifiers.contains(&key) {
-        self.update_modifier(key, value);
-        continue;
-    }
-    
-    // Handle real modifier keys - update state AND send the key
-    if MODIFIER_KEYS.contains(&key) {
-        self.update_modifier(key, value);
-        self.send_key(&key, value);
-        continue;
-    }
-    
-    // Handle non-modifier keys
-    if is_pressed(value) {
+            // Handle virtual modifiers
+            if config.virtual_modifiers.contains(&key) {
+                self.update_modifier(key, value);
+                continue;
+            }
+            
+            // Handle real modifier keys - update state AND send the key
+            if MODIFIER_KEYS.contains(&key) {
+                self.update_modifier(key, value);
+                self.send_key(&key, value);
+                continue;
+            }
+            
+            // Handle non-modifier keys
+            if is_pressed(value) {
                 if self.escape_next_key {
                     self.escape_next_key = false;
                 }
@@ -290,7 +291,7 @@ impl EventHandler {
                     continue;
                 }
 
-                // === 2. SECOND: Only if no hotkey matched — process hotstrings ===
+                // === 2. SECOND: Only if no hotkey matched – process hotstrings ===
                 if let Some(matcher) = &config.hotstring_matcher {
                     match self.key_to_char(&key) {
                         Some(ch) => {
@@ -333,7 +334,7 @@ impl EventHandler {
 
                                 self.hotstring_buffer.clear();
                                 self.hotstring_state = None;
-                                continue; // hotstring matched — suppress original key
+                                continue; // hotstring matched – suppress original key
                             }
                         }
                         None => {
@@ -347,7 +348,7 @@ impl EventHandler {
                 // If nothing matched above, pass through the original key
                 self.send_key(&key, value);
             } else {
-                // Release or repeat — just send
+                // Release or repeat – just send
                 self.send_key(&key, value);
             }
 
@@ -361,7 +362,6 @@ impl EventHandler {
         Ok(send_original_relative_event)
     }
 
-
     // Handle EventType::RELATIVE
     fn on_relative_event(
         &mut self,
@@ -370,75 +370,30 @@ impl EventHandler {
         config: &Config,
         device: &InputDeviceInfo,
     ) -> Result<(), Box<dyn Error>> {
-        // Because a "full" RELATIVE event is only one event,
-        // it doesn't translate very well into a KEY event (because those have a "press" event and an "unpress" event).
-        // The solution used here is to send two events for each relative event :
-        // one for the press "event" and one for the "unpress" event.
-
-        // These consts are used because 'RELEASE'/'PRESS' are better than '0'/'1' at indicating a button release/press.
         const RELEASE: i32 = 0;
         const PRESS: i32 = 1;
 
-        // All relative events (except maybe those i haven't found information about (REL_DIAL, REL_MISC and REL_RESERVED))
-        // can have either a positive value or a negative value.
-        // A negative value is associated with a different action than the positive value.
-        // Specifically, negative values are associated with the opposite of the action that would emit a positive value.
-        // For example, a positive value for a scroll event (REL_WHEEL) comes from an upscroll, while a negative value comes from a downscroll.
         let key = match event.value {
-            // Positive and negative values can be really high because the events are relative,
-            // so their values are variable, meaning we have to match with all positive/negative values.
-            // Not sure if there is any relative event with a fixed value.
             1..=i32::MAX => (event.code * 2) + DISGUISED_EVENT_OFFSETTER,
-            // While some events may appear to have a fixed value,
-            // events like scrolling will have higher values with more "agressive" scrolling.
-
-            // *2 to create a "gap" between events (since multiplying by two means that all resulting values will be even, the odd numbers between will be missing),
-            // +1 if the event has a negative value to "fill" the gap (since adding one shifts the parity from even to odd),
-            // and adding DISGUISED_EVENT_OFFSETTER,
-            // so that the total as a keycode corresponds to one of the custom aliases that
-            // are created in config::key::parse_key specifically for these "disguised" relative events.
             i32::MIN..=-1 => (event.code * 2) + 1 + DISGUISED_EVENT_OFFSETTER,
-
             0 => {
                 println!("This event has a value of zero : {event:?}");
-                // A value of zero would be unexpected for a relative event,
-                // since changing something by zero is kinda useless.
-                // Just in case it can actually happen (and also because match arms need the same output type),
-                // we'll just act like the value of the event was a positive.
                 (event.code * 2) + DISGUISED_EVENT_OFFSETTER
             }
         };
 
-        // Sending a RELATIVE event "disguised" as a "fake" KEY event press to on_key_event.
         match self.on_key_event(&KeyEvent::new_with(key, PRESS), config, device)? {
-            // the boolean value is from a variable at the end of on_key_event from event_handler,
-            // used to indicate whether the event got through unchanged.
             true => {
-                // Sending the original RELATIVE event if the "press" version of the "fake" KEY event got through on_key_event unchanged.
                 let action = RelativeEvent::new_with(event.code, event.value);
                 if event.code <= 2 {
-                    // If it's a mouse movement event (event.code <= 2),
-                    // it is added to mouse_movement_collection to later be sent alongside all other mouse movement event,
-                    // as a single MouseMovementEventCollection instead of potentially multiple RelativeEvent .
-
-                    // Mouse movement events need to be sent all at once because they would otherwise be separated by a synchronization event¹,
-                    // which the OS handles differently from two unseparated mouse movement events.
-                    // For example, a REL_X event², followed by a SYNCHRONIZATION event, followed by a REL_Y event³, followed by a SYNCHRONIZATION event,
-                    // will move the mouse cursor by a different amount than a REL_X followed by a REL_Y followed by a SYNCHRONIZATION.
-
-                    // ¹Because Xremap usually sends events one by one through evdev's "emit" function, which adds a synchronization event during each call.
-                    // ²Mouse movement along the X (horizontal) axis.
-                    // ³Mouse movement along the Y (vertical) axis.
                     mouse_movement_collection.push(action);
                 } else {
-                    // Otherwise, the event is directly sent as a relative event, to be dispatched like other events.
                     self.send_action(Action::RelativeEvent(action));
                 }
             }
             false => {}
         }
 
-        // Sending the "unpressed" version of the "fake" KEY event.
         self.on_key_event(&KeyEvent::new_with(key, RELEASE), config, device)?;
 
         Ok(())
@@ -468,7 +423,6 @@ impl EventHandler {
     }
 
     fn send_key(&mut self, key: &Key, value: i32) {
-        // let event = InputEvent::new(EventType::KEY, key.code(), value);
         let event = KeyEvent::new_with(key.code(), value);
         self.send_action(Action::KeyEvent(event));
     }
@@ -479,7 +433,7 @@ impl EventHandler {
 
     // Repeat/Release what's originally pressed even if remapping changes while holding it
     fn maintain_pressed_keys(&mut self, key: Key, value: i32, events: &mut [(Key, i32)]) {
-        // Not handling multi-purpose keysfor now; too complicated
+        // Not handling multi-purpose keys for now; too complicated
         if events.len() != 1 || value != events[0].1 {
             return;
         }
@@ -553,8 +507,6 @@ impl EventHandler {
                 repeat,
                 release,
             }) => {
-                // Just hook actions, and then emit the original event. We might want to
-                // support reordering the key event and dispatched actions later.
                 let actions_to_dispatch = match value {
                     PRESS => press,
                     RELEASE => release,
@@ -572,8 +524,8 @@ impl EventHandler {
                 )?;
 
                 match skip_key_event {
-                    true => vec![],              // do not dispatch the original key
-                    false => vec![(key, value)], // dispatch the original key
+                    true => vec![],
+                    false => vec![(key, value)],
                 }
             }
         };
@@ -595,7 +547,6 @@ impl EventHandler {
                 flushed.extend(state.force_held());
             }
 
-            // filter out key presses that are part of the flushed events
             let flushed_presses: HashSet<Key> = flushed
                 .iter()
                 .filter_map(|(k, v)| (*v == PRESS).then_some(*k))
@@ -671,7 +622,6 @@ impl EventHandler {
                         let actions = with_extra_modifiers(&entry.actions, &extra_modifiers, entry.exact_match);
                         let is_remap = is_remap(&entry.actions);
 
-                        // If the first/top match was a remap, continue to find rest of the eligible remaps for this key
                         if remaps.is_empty() && !is_remap {
                             return Ok(Some(actions));
                         } else if is_remap {
@@ -683,7 +633,6 @@ impl EventHandler {
                     }
                 }
             }
-            // An override remap is set but not used. Flush the pending key.
             self.timeout_override()?;
         }
 
@@ -723,7 +672,6 @@ impl EventHandler {
                     let actions = with_extra_modifiers(&entry.actions, &extra_modifiers, entry.exact_match);
                     let is_remap = is_remap(&entry.actions);
 
-                    // If the first/top match was a remap, continue to find rest of the eligible remaps for this key
                     if remaps.is_empty() && !is_remap {
                         return Ok(Some(actions));
                     } else if is_remap {
@@ -760,12 +708,9 @@ impl EventHandler {
                 self.override_remaps
                     .push(build_override_table(remap, action.exact_match));
 
-                // Set timeout only if this is the first of multiple eligible remaps,
-                // so the behaviour is consistent with how current normal keymap override works
                 if set_timeout {
                     if let Some(timeout) = timeout {
                         let expiration = Expiration::OneShot(TimeSpec::from_duration(*timeout));
-                        // TODO: Consider handling the timer in ActionDispatcher
                         self.override_timer.unset()?;
                         self.override_timer.set(expiration, TimerSetTimeFlags::empty())?;
                         self.override_timeout_key = timeout_key.clone().or_else(|| Some(vec![*key]))
@@ -787,28 +732,52 @@ impl EventHandler {
                     self.extra_modifiers.insert(*key);
                 }
             }
+            KeymapAction::AhkInterpreted(ahk_action) => {
+    // Save currently held modifiers
+    let held_modifiers: Vec<Key> = self.modifiers.iter().copied().collect();
+    
+    // Virtually release them (send release events)
+    for modifier in &held_modifiers {
+        self.send_key(modifier, RELEASE);
+    }
+    
+    // Execute interpreter
+    let mut interpreter = crate::ahk::interpreter::AhkInterpreter::new(&mut self.application_client);
+    match interpreter.execute(ahk_action) {
+        Ok(interp_actions) => {
+            for action in interp_actions {
+                self.send_action(action);
+            }
+        }
+        Err(e) => eprintln!("ERROR: AHK interpreter failed: {}", e),
+    }
+    
+    // Restore modifiers if they're still physically held
+    // (This happens automatically when user releases them physically)
+    // Just update internal state to match
+    for modifier in &held_modifiers {
+        if self.is_physically_held(modifier) {
+            self.send_key(modifier, PRESS);
+        }
+    }
+}
         }
         Ok(())
     }
 
     fn send_key_press_and_release(&mut self, key_press: &KeyPress) {
-        // Build extra or missing modifiers. Note that only MODIFIER_KEYS are handled
-        // because virtual modifiers shouldn't make an impact outside xremap.
         let (mut extra_modifiers, mut missing_modifiers) = self.diff_modifiers(&key_press.modifiers);
         extra_modifiers.retain(|key| MODIFIER_KEYS.contains(key) && !self.extra_modifiers.contains(key));
         missing_modifiers.retain(|key| MODIFIER_KEYS.contains(key));
 
-        // Emulate the modifiers of KeyPress
         self.send_keys(&missing_modifiers, PRESS);
         self.send_keys(&extra_modifiers, RELEASE);
 
-        // Press the main key
         self.send_key(&key_press.key, PRESS);
         self.send_key(&key_press.key, RELEASE);
 
         self.send_action(Action::Delay(self.keypress_delay));
 
-        // Resurrect the original modifiers
         self.send_keys(&extra_modifiers, PRESS);
         self.send_action(Action::Delay(self.keypress_delay));
         self.send_keys(&missing_modifiers, RELEASE);
@@ -831,7 +800,6 @@ impl EventHandler {
         self.send_action(Action::Command(command));
     }
 
-    // Return (extra_modifiers, missing_modifiers)
     fn diff_modifiers(&self, modifiers: &[Modifier]) -> (Vec<Key>, Vec<Key>) {
         let extra_modifiers: Vec<Key> = self
             .modifiers
@@ -873,12 +841,27 @@ impl EventHandler {
             Modifier::Key(key) => self.modifiers.contains(key),
         }
     }
+
     fn match_window(&mut self, window_matcher: &OnlyOrNot) -> bool {
-        // Lazily fill the wm_class cache
         if self.title_cache.is_none() {
             match self.application_client.current_window() {
-                Some(title) => self.title_cache = Some(title),
-                None => self.title_cache = Some(String::new()),
+                Some(title) if !title.is_empty() => self.title_cache = Some(title),
+                _ => {
+                    if let Ok(output) = std::process::Command::new("kdotool")
+                        .arg("getactivewindow")
+                        .arg("getwindowname")
+                        .output()
+                    {
+                        if output.status.success() {
+                            let title = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                            self.title_cache = Some(title);
+                        } else {
+                            self.title_cache = Some(String::new());
+                        }
+                    } else {
+                        self.title_cache = Some(String::new());
+                    }
+                }
             }
         }
 
@@ -894,11 +877,25 @@ impl EventHandler {
     }
 
     fn match_application(&mut self, application_matcher: &OnlyOrNot) -> bool {
-        // Lazily fill the wm_class cache
         if self.application_cache.is_none() {
             match self.application_client.current_application() {
-                Some(application) => self.application_cache = Some(application),
-                None => self.application_cache = Some(String::new()),
+                Some(application) if !application.is_empty() => self.application_cache = Some(application),
+                _ => {
+                    if let Ok(output) = std::process::Command::new("kdotool")
+                        .arg("getactivewindow")
+                        .arg("getwindowclassname")
+                        .output()
+                    {
+                        if output.status.success() {
+                            let application = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                            self.application_cache = Some(application);
+                        } else {
+                            self.application_cache = Some(String::new());
+                        }
+                    } else {
+                        self.application_cache = Some(String::new());
+                    }
+                }
             }
         }
 
@@ -913,7 +910,7 @@ impl EventHandler {
         false
     }
 
-    fn match_device(&self, device_matcher: &config::device::Device, device: &InputDeviceInfo) -> bool {
+    fn match_device(&self, device_matcher: &crate::config::device::Device, device: &InputDeviceInfo) -> bool {
         if let Some(device_only) = &device_matcher.only {
             return device_only.iter().any(|m| device.matches(m));
         }
@@ -930,16 +927,18 @@ impl EventHandler {
             self.modifiers.remove(&key);
         }
     }
+
+    fn is_physically_held(&self, key: &Key) -> bool {
+    // Check if the key is currently in our modifiers set
+    // This represents the physical state
+    self.modifiers.contains(key)
+}
+
+
 }
 
 fn is_remap(actions: &[KeymapAction]) -> bool {
     if actions.is_empty() {
-        // When actions is empty it could either be regarded as an empty remap
-        //  or no actions. In principle that shouldn't matter, but remap is
-        //  implemented to gather all defined remaps, not just the first match.
-        // Here we regard an empty actions as non-remap, so the matching will stop
-        //  here, and no actions are performed. The possibly following remaps are
-        //  hence ignored.
         return false;
     }
 
@@ -949,7 +948,6 @@ fn is_remap(actions: &[KeymapAction]) -> bool {
 fn with_extra_modifiers(actions: &[KeymapAction], extra_modifiers: &[Key], exact_match: bool) -> Vec<TaggedAction> {
     let mut result: Vec<TaggedAction> = vec![];
     if !extra_modifiers.is_empty() {
-        // Virtually release extra modifiers so that they won't be physically released on KeyPress
         result.push(TaggedAction {
             action: KeymapAction::SetExtraModifiers(extra_modifiers.to_vec()),
             exact_match,
@@ -960,7 +958,6 @@ fn with_extra_modifiers(actions: &[KeymapAction], extra_modifiers: &[Key], exact
         exact_match,
     }));
     if !extra_modifiers.is_empty() {
-        // Resurrect the modifier status
         result.push(TaggedAction {
             action: KeymapAction::SetExtraModifiers(vec![]),
             exact_match,
@@ -986,41 +983,30 @@ fn contains_modifier(modifiers: &[Modifier], key: &Key) -> bool {
 
 lazy_static! {
     static ref MODIFIER_KEYS: [Key; 8] = [
-        // Shift
         Key::KEY_LEFTSHIFT,
         Key::KEY_RIGHTSHIFT,
-        // Control
         Key::KEY_LEFTCTRL,
         Key::KEY_RIGHTCTRL,
-        // Alt
         Key::KEY_LEFTALT,
         Key::KEY_RIGHTALT,
-        // Windows
         Key::KEY_LEFTMETA,
         Key::KEY_RIGHTMETA,
     ];
 }
 
-// ---
-
 fn is_pressed(value: i32) -> bool {
     value == PRESS || value == REPEAT
 }
 
-// InputEvent#value
 const RELEASE: i32 = 0;
 const PRESS: i32 = 1;
 const REPEAT: i32 = 2;
-
-// ---
 
 #[derive(Debug)]
 struct MultiPurposeKeyState {
     held: Keys,
     alone: Keys,
-    // Some if the first press is still delayed, None if already considered held.
     alone_timeout_at: Option<Instant>,
-    // Whether the multipurpose key is considered to be held down, and key presses has been emitted.
     held_down: bool,
 }
 
@@ -1028,10 +1014,9 @@ impl MultiPurposeKeyState {
     fn repeat(&mut self) -> Vec<(Key, i32)> {
         match self.alone_timeout_at {
             Some(alone_timeout_at) if Instant::now() < alone_timeout_at => {
-                vec![] // still delay the press
+                vec![]
             }
             Some(_) => {
-                // timeout
                 self.alone_timeout_at = None;
                 self.held_down = true;
                 let mut keys = self.held.clone().into_vec();
@@ -1061,8 +1046,6 @@ impl MultiPurposeKeyState {
         }
     }
 
-    // Other keys where pressed, so the multipurpose key
-    // should emit presses of its held-value.
     fn force_held(&mut self) -> Vec<(Key, i32)> {
         let press = match self.alone_timeout_at {
             Some(_) => {
@@ -1102,9 +1085,6 @@ impl MultiPurposeKeyState {
     }
 }
 
-/// Orders modifier keys ahead of non-modifier keys.
-/// Unfortunately the underlying type doesn't allow direct
-/// comparison, but that's ok for our purposes.
 fn modifiers_first(a: &Key, b: &Key) -> Ordering {
     if MODIFIER_KEYS.contains(a) {
         if MODIFIER_KEYS.contains(b) {
@@ -1115,7 +1095,6 @@ fn modifiers_first(a: &Key, b: &Key) -> Ordering {
     } else if MODIFIER_KEYS.contains(b) {
         Ordering::Greater
     } else {
-        // Neither are modifiers
         Ordering::Equal
     }
 }

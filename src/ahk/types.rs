@@ -1,3 +1,4 @@
+
 use evdev::KeyCode;
 
 #[derive(Debug, Clone)]
@@ -25,10 +26,36 @@ pub struct AhkHotstring {
     pub execute: bool,
     pub context: Option<String>,
 }
+
 #[derive(Debug, Clone)]
 pub enum AhkAction {
     Run(Vec<String>),
     Send(String),
     Remap(Vec<KeyCode>),
     Sleep(u64),
+    Shell(String),           // NEW: raw shell script
+    Block(Vec<AhkAction>),   // NEW: sequence of actions
+    WinActivate(WindowCriteria),
+    WinClose(WindowCriteria),
+    IfWinActive {
+        criteria: WindowCriteria,
+        then_actions: Vec<AhkAction>,
+        else_actions: Option<Vec<AhkAction>>,
+    },
+    WinWaitActive { criteria: WindowCriteria, timeout_ms: Option<u64> },
+
+}
+
+#[derive(Debug, Clone)]
+pub enum WindowCriteria {
+    Title(String),      // WinActivate("Firefox")
+    Class(String),      // WinActivate("ahk_class dolphin")
+    Exe(String),        // WinActivate("ahk_exe google-chrome")
+}
+
+#[derive(Debug, Clone)]
+pub enum WindowCommand {
+    Activate,
+    WaitActive,
+    Close,
 }
