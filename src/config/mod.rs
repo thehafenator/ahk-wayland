@@ -244,6 +244,26 @@ pub fn load_configs(filenames: &[PathBuf]) -> Result<Config, Box<dyn error::Erro
             // Add CapsLock as virtual modifier for AHK configs
             config.virtual_modifiers.push(Key::KEY_CAPSLOCK);
             
+            // // Disable CapsLock toggle functionality
+            use crate::config::modmap_action::{ModmapAction, Keys};
+            // config.modmap.push(Modmap {
+            //     name: "Disable CapsLock toggle".to_string(),
+            //     remap: {
+            //         let mut map = HashMap::new();
+            //         map.insert(Key::KEY_CAPSLOCK, ModmapAction::Keys(Keys::Key(Key::KEY_CAPSLOCK)));
+            //         map
+            //     },
+            //     application: None,
+            //     window: None,
+            //     device: None,
+            //     mode: None,
+            // });
+
+
+
+
+
+
             let mut context_hotkeys = Vec::new();
             let mut global_hotkeys = Vec::new();
 
@@ -325,90 +345,6 @@ for filename in &filenames[1..] {
     Ok(config)
 }
 
-// fn convert_actions(action: AhkAction) -> Vec<KeymapAction> {
-//     match action {
-//         AhkAction::Run(parts) => {
-//             let mut cmd = Vec::new();
-//             if parts[0].starts_with("http://") || parts[0].starts_with("https://") {
-//                 cmd.push("xdg-open".to_string());
-//                 cmd.push(parts[0].clone());
-//             } else {
-//                 cmd.push("/bin/sh".to_string());
-//                 cmd.push("-c".to_string());
-//                 cmd.push(parts.join(" "));
-//             }
-//             vec![KeymapAction::Launch(cmd)]
-//         }
-//         AhkAction::Send(keys) => convert_send_to_actions(&keys),
-//         AhkAction::Remap(target_keys) => {
-//             target_keys
-//                 .into_iter()
-//                 .map(|k| {
-//                     keymap_action::KeymapAction::KeyPressAndRelease(key_press::KeyPress {
-//                         key: k,
-//                         modifiers: vec![],
-//                     })
-//                 })
-//                 .collect()
-//         }
-//         AhkAction::Sleep(ms) => {
-//             vec![keymap_action::KeymapAction::Sleep(ms)]
-//         }
-//         AhkAction::Shell(script) => {
-//             vec![KeymapAction::Launch(vec![
-//                 "/bin/sh".to_string(),
-//                 "-c".to_string(),
-//                 script.trim().to_string(),
-//             ])]
-//         }
-//         AhkAction::Block(actions) => {
-//             let mut all = Vec::new();
-//             for a in actions {
-//                 all.extend(convert_actions(a));
-//             }
-//             all
-//         }
-//         AhkAction::WinActivate(criteria) => {
-//             vec![KeymapAction::Launch(build_kdotool_command("windowactivate", &criteria))]
-//         }
-//         AhkAction::WinWaitActive(criteria) => {
-//             vec![KeymapAction::Launch(vec![
-//                 "/bin/sh".to_string(),
-//                 "-c".to_string(),
-//                 format!(
-//                     "for i in {{1..50}}; do {} && break; sleep 0.1; done",
-//                     build_kdotool_shell(&criteria, "windowactivate")
-//                 ),
-//             ])]
-//         }
-//         AhkAction::WinClose(criteria) => {
-//             vec![KeymapAction::Launch(build_kdotool_command("windowclose", &criteria))]
-//         }
-// AhkAction::IfWinActive { criteria, then_actions, else_actions } => {
-//     let condition_check = build_kdotool_shell(&criteria, "getactivewindow");
-//     let then_script = actions_to_shell_script(&then_actions);
-    
-//     let mut script = format!("if {} ; then\n{}", condition_check, then_script);
-    
-//     if let Some(else_actions) = else_actions {
-//         let else_script = actions_to_shell_script(&else_actions);
-//         script.push_str(&format!("\nelse\n{}", else_script));
-//     }
-    
-//     script.push_str("\nfi");
-    
-//     // PRINT THE SCRIPT AT CONFIG LOAD TIME
-//     println!("=== IF/ELSE SHELL SCRIPT ===\n{}\n============================", script);
-    
-//     vec![KeymapAction::Launch(vec![
-//         "/bin/sh".to_string(),
-//         "-c".to_string(),
-//         script,
-//     ])]
-// }
-//     }
-// }
-
 // Update the convert_actions function to detect when to use the interpreter
 fn convert_actions(action: AhkAction) -> Vec<KeymapAction> {
     // Check if this action or any nested actions contain Send() or other
@@ -429,6 +365,7 @@ fn needs_interpreter(action: &AhkAction) -> bool {
     match action {
         AhkAction::Send(_) => true,
         AhkAction::Remap(_) => true, // Direct key remap needs dispatcher
+        AhkAction::WinWaitActive { .. } => true, // Needs interpreter for blocking wait
         AhkAction::Block(actions) => actions.iter().any(needs_interpreter),
         AhkAction::IfWinActive { then_actions, else_actions, .. } => {
             then_actions.iter().any(needs_interpreter) 
@@ -439,7 +376,6 @@ fn needs_interpreter(action: &AhkAction) -> bool {
         | AhkAction::Shell(_) 
         | AhkAction::Sleep(_) 
         | AhkAction::WinActivate(_) 
-        | AhkAction::WinWaitActive { .. } 
         | AhkAction::WinClose(_) => false,
     }
 }
@@ -489,16 +425,6 @@ AhkAction::Send(_keys) => {
         AhkAction::WinActivate(criteria) => {
             vec![KeymapAction::Launch(build_kdotool_command("windowactivate", &criteria))]
         }
-        // AhkAction::WinWaitActive(criteria) => {
-        //     vec![KeymapAction::Launch(vec![
-        //         "/bin/sh".to_string(),
-        //         "-c".to_string(),
-        //         format!(
-        //             "for i in {{1..50}}; do {} && break; sleep 0.1; done",
-        //             build_kdotool_shell(&criteria, "windowactivate")
-        //         ),
-        //     ])]
-        // }
 
         AhkAction::WinWaitActive { .. } => {
             // Should never reach here - needs_interpreter returns true for this

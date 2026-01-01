@@ -249,7 +249,7 @@ impl EventHandler {
 
         // Apply modmap
         let mut key_values = if let Some(key_action) = self.find_modmap(config, &key, device) {
-            self.dispatch_keys(key_action, key, event.value())?
+            self.dispatch_keys(key_action, key, event.value(), config)?
         } else {
             vec![(key, event.value())]
         };
@@ -283,11 +283,11 @@ impl EventHandler {
 
                 // === 1. FIRST: Check regular hotkeys (including ^t, Ctrl+anything, etc.) ===
                 else if let Some(actions) = self.find_keymap(config, &key, device)? {
-                    self.dispatch_actions(&actions, &key)?;
+                    self.dispatch_actions(&actions, &key, config)?;
                     continue;
                 }
                 if let Some(actions) = self.find_keymap(config, &KEY_MATCH_ANY, device)? {
-                    self.dispatch_actions(&actions, &KEY_MATCH_ANY)?;
+                    self.dispatch_actions(&actions, &KEY_MATCH_ANY, config)?;
                     continue;
                 }
 
@@ -323,7 +323,14 @@ impl EventHandler {
                                         }
                                     }
                                 } else {
-                                    // Regular text expansion
+                                    // // Regular text expansion ; wasn't sending ^v properly
+                                    // let final_replacement = hotstring_match.replacement.clone();
+                                    // self.send_action(Action::TextExpansion {
+                                    //     trigger_len: chars_to_delete,
+                                    //     replacement: final_replacement,
+                                    //     add_space: !hotstring_match.omit_char && !hotstring_match.immediate,
+                                    // });
+                                    // Regular text expansion using ydotool method
                                     let final_replacement = hotstring_match.replacement.clone();
                                     self.send_action(Action::TextExpansion {
                                         trigger_len: chars_to_delete,
@@ -452,85 +459,87 @@ impl EventHandler {
     }
 
     fn dispatch_keys(
-        &mut self,
-        key_action: ModmapAction,
-        key: Key,
-        value: i32,
-    ) -> Result<Vec<(Key, i32)>, Box<dyn Error>> {
-        let keys = match key_action {
-            ModmapAction::Keys(modmap_keys) => modmap_keys
-                .into_vec()
-                .into_iter()
-                .map(|modmap_key| (modmap_key, value))
-                .collect(),
-            ModmapAction::MultiPurposeKey(MultiPurposeKey {
-                held,
-                alone,
-                alone_timeout,
-                free_hold,
-            }) => {
-                match value {
-                    PRESS => {
-                        self.multi_purpose_keys.insert(
-                            key,
-                            MultiPurposeKeyState {
-                                held,
-                                alone,
-                                alone_timeout_at: if free_hold {
-                                    None
-                                } else {
-                                    Some(Instant::now() + alone_timeout)
-                                },
-                                held_down: false,
+    &mut self,
+    key_action: ModmapAction,
+    key: Key,
+    value: i32,
+    config: &Config,
+) -> Result<Vec<(Key, i32)>, Box<dyn Error>> {
+    let keys = match key_action {
+        ModmapAction::Keys(modmap_keys) => modmap_keys
+            .into_vec()
+            .into_iter()
+            .map(|modmap_key| (modmap_key, value))
+            .collect(),
+        ModmapAction::MultiPurposeKey(MultiPurposeKey {
+            held,
+            alone,
+            alone_timeout,
+            free_hold,
+        }) => {
+            match value {
+                PRESS => {
+                    self.multi_purpose_keys.insert(
+                        key,
+                        MultiPurposeKeyState {
+                            held,
+                            alone,
+                            alone_timeout_at: if free_hold {
+                                None
+                            } else {
+                                Some(Instant::now() + alone_timeout)
                             },
-                        );
-                        return Ok(vec![]); // delay the press
-                    }
-                    REPEAT => {
-                        if let Some(state) = self.multi_purpose_keys.get_mut(&key) {
-                            return Ok(state.repeat());
-                        }
-                    }
-                    RELEASE => {
-                        if let Some(state) = self.multi_purpose_keys.remove(&key) {
-                            return Ok(state.release());
-                        }
-                    }
-                    _ => panic!("unexpected key event value: {value}"),
+                            held_down: false,
+                        },
+                    );
+                    return Ok(vec![]); // delay the press
                 }
-                // fallthrough on state discrepancy
-                vec![(key, value)]
+                REPEAT => {
+                    if let Some(state) = self.multi_purpose_keys.get_mut(&key) {
+                        return Ok(state.repeat());
+                    }
+                }
+                RELEASE => {
+                    if let Some(state) = self.multi_purpose_keys.remove(&key) {
+                        return Ok(state.release());
+                    }
+                }
+                _ => panic!("unexpected key event value: {value}"),
             }
-            ModmapAction::PressReleaseKey(PressReleaseKey {
-                skip_key_event,
-                press,
-                repeat,
-                release,
-            }) => {
-                let actions_to_dispatch = match value {
-                    PRESS => press,
-                    RELEASE => release,
-                    _ => repeat,
-                };
-                self.dispatch_actions(
-                    &actions_to_dispatch
-                        .into_iter()
-                        .map(|action| TaggedAction {
-                            action,
-                            exact_match: false,
-                        })
-                        .collect(),
-                    &key,
-                )?;
+            // fallthrough on state discrepancy
+            vec![(key, value)]
+        }
+        ModmapAction::PressReleaseKey(PressReleaseKey {
+            skip_key_event,
+            press,
+            repeat,
+            release,
+        }) => {
+            let actions_to_dispatch = match value {
+                PRESS => press,
+                RELEASE => release,
+                _ => repeat,
+            };
+            self.dispatch_actions(
+                &actions_to_dispatch
+                    .into_iter()
+                    .map(|action| TaggedAction {
+                        action,
+                        exact_match: false,
+                    })
+                    .collect(),
+                &key,
+                config,
+            )?;
 
-                match skip_key_event {
-                    true => vec![],
-                    false => vec![(key, value)],
-                }
+            match skip_key_event {
+                true => vec![],
+                false => vec![(key, value)],
             }
-        };
-        Ok(keys)
-    }
+        }
+    };
+    Ok(keys)
+}
 
     fn flush_timeout_keys(&mut self, key_values: Vec<(Key, i32)>) -> Vec<(Key, i32)> {
         let mut flush = false;
@@ -686,63 +695,84 @@ impl EventHandler {
         Ok(None)
     }
 
-    fn dispatch_actions(&mut self, actions: &Vec<TaggedAction>, key: &Key) -> Result<(), Box<dyn Error>> {
-        for action in actions {
-            self.dispatch_action(action, key)?;
-        }
-        Ok(())
+fn dispatch_actions(&mut self, actions: &Vec<TaggedAction>, key: &Key, config: &Config) -> Result<(), Box<dyn Error>> {
+    for action in actions {
+        self.dispatch_action(action, key, config)?;
     }
+    Ok(())
+}
 
-    fn dispatch_action(&mut self, action: &TaggedAction, key: &Key) -> Result<(), Box<dyn Error>> {
-        match &action.action {
-            KeymapAction::KeyPressAndRelease(key_press) => self.send_key_press_and_release(key_press),
-            KeymapAction::KeyPress(key) => self.send_key(key, PRESS),
-            KeymapAction::KeyRepeat(key) => self.send_key(key, REPEAT),
-            KeymapAction::KeyRelease(key) => self.send_key(key, RELEASE),
-            KeymapAction::Remap(Remap {
-                remap,
-                timeout,
-                timeout_key,
-            }) => {
-                let set_timeout = self.override_remaps.is_empty();
-                self.override_remaps
-                    .push(build_override_table(remap, action.exact_match));
+fn dispatch_action(&mut self, action: &TaggedAction, key: &Key, config: &Config) -> Result<(), Box<dyn Error>> {
+    match &action.action {
+        KeymapAction::KeyPressAndRelease(key_press) => self.send_key_press_and_release(key_press),
+        KeymapAction::KeyPress(key) => self.send_key(key, PRESS),
+        KeymapAction::KeyRepeat(key) => self.send_key(key, REPEAT),
+        KeymapAction::KeyRelease(key) => self.send_key(key, RELEASE),
+        KeymapAction::Remap(Remap {
+            remap,
+            timeout,
+            timeout_key,
+        }) => {
+            let set_timeout = self.override_remaps.is_empty();
+            self.override_remaps
+                .push(build_override_table(remap, action.exact_match));
 
-                if set_timeout {
-                    if let Some(timeout) = timeout {
-                        let expiration = Expiration::OneShot(TimeSpec::from_duration(*timeout));
-                        self.override_timer.unset()?;
-                        self.override_timer.set(expiration, TimerSetTimeFlags::empty())?;
-                        self.override_timeout_key = timeout_key.clone().or_else(|| Some(vec![*key]))
-                    }
+            if set_timeout {
+                if let Some(timeout) = timeout {
+                    let expiration = Expiration::OneShot(TimeSpec::from_duration(*timeout));
+                    self.override_timer.unset()?;
+                    self.override_timer.set(expiration, TimerSetTimeFlags::empty())?;
+                    self.override_timeout_key = timeout_key.clone().or_else(|| Some(vec![*key]))
                 }
             }
-            KeymapAction::Launch(command) => self.run_command(command.clone()),
-            KeymapAction::SetMode(mode) => {
-                self.mode = mode.clone();
-                println!("mode: {mode}");
+        }
+        KeymapAction::Launch(command) => self.run_command(command.clone()),
+        KeymapAction::SetMode(mode) => {
+            self.mode = mode.clone();
+            println!("mode: {mode}");
+        }
+        KeymapAction::SetMark(set) => self.mark_set = *set,
+        KeymapAction::WithMark(key_press) => self.send_key_press_and_release(&self.with_mark(key_press)),
+        KeymapAction::EscapeNextKey(escape_next_key) => self.escape_next_key = *escape_next_key,
+        KeymapAction::Sleep(millis) => self.send_action(Action::Delay(Duration::from_millis(*millis))),
+        KeymapAction::SetExtraModifiers(keys) => {
+            self.extra_modifiers.clear();
+            for key in keys {
+                self.extra_modifiers.insert(*key);
             }
-            KeymapAction::SetMark(set) => self.mark_set = *set,
-            KeymapAction::WithMark(key_press) => self.send_key_press_and_release(&self.with_mark(key_press)),
-            KeymapAction::EscapeNextKey(escape_next_key) => self.escape_next_key = *escape_next_key,
-            KeymapAction::Sleep(millis) => self.send_action(Action::Delay(Duration::from_millis(*millis))),
-            KeymapAction::SetExtraModifiers(keys) => {
-                self.extra_modifiers.clear();
-                for key in keys {
-                    self.extra_modifiers.insert(*key);
-                }
-            }
-            KeymapAction::AhkInterpreted(ahk_action) => {
-    // Save currently held modifiers
+        }
+        // KeymapAction::AhkInterpreted(ahk_action) => {
+        //     // Get currently held VIRTUAL modifiers (CapsLock, etc.) - NOT real modifiers
+        //     let virtual_modifiers: Vec<Key> = self.modifiers.iter()
+        //         .filter(|k| config.virtual_modifiers.contains(k))
+        //         .copied()
+        //         .collect();
+            
+        //     eprintln!("DEBUG: Virtual modifiers for AHK action: {:?}", virtual_modifiers);
+            
+        //     // Create interpreter and set virtual modifiers
+        //     let mut interpreter = crate::ahk::interpreter::AhkInterpreter::new(&mut self.application_client);
+        //     interpreter.set_virtual_modifiers(&virtual_modifiers);
+            
+        //     match interpreter.execute(ahk_action) {
+        //         Ok(interp_actions) => {
+        //             for action in interp_actions {
+        //                 self.send_action(action);
+        //             }
+        //         }
+        //         Err(e) => eprintln!("ERROR: AHK interpreter failed: {}", e),
+        //     }
+        // }
+        KeymapAction::AhkInterpreted(ahk_action) => {
+    // Pass ALL currently held modifiers to the interpreter
     let held_modifiers: Vec<Key> = self.modifiers.iter().copied().collect();
     
-    // Virtually release them (send release events)
-    for modifier in &held_modifiers {
-        self.send_key(modifier, RELEASE);
-    }
+    eprintln!("DEBUG: Held modifiers for AHK action: {:?}", held_modifiers);
     
-    // Execute interpreter
+    // Create interpreter and set ALL held modifiers
     let mut interpreter = crate::ahk::interpreter::AhkInterpreter::new(&mut self.application_client);
+    interpreter.set_virtual_modifiers(&held_modifiers);  // Pass ALL held modifiers
+    
     match interpreter.execute(ahk_action) {
         Ok(interp_actions) => {
             for action in interp_actions {
@@ -751,20 +781,10 @@ impl EventHandler {
         }
         Err(e) => eprintln!("ERROR: AHK interpreter failed: {}", e),
     }
-    
-    // Restore modifiers if they're still physically held
-    // (This happens automatically when user releases them physically)
-    // Just update internal state to match
-    for modifier in &held_modifiers {
-        if self.is_physically_held(modifier) {
-            self.send_key(modifier, PRESS);
-        }
-    }
 }
-        }
-        Ok(())
     }
-
+    Ok(())
+}
     fn send_key_press_and_release(&mut self, key_press: &KeyPress) {
         let (mut extra_modifiers, mut missing_modifiers) = self.diff_modifiers(&key_press.modifiers);
         extra_modifiers.retain(|key| MODIFIER_KEYS.contains(key) && !self.extra_modifiers.contains(key));

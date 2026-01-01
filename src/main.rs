@@ -20,6 +20,7 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::PathBuf;
 use std::time::Duration;
 use xremap::{action_dispatcher, client, config, device, event, event_handler};
+use xremap::ahk::interpreter::AhkInterpreter;
 
 #[cfg(test)]
 mod tests;
@@ -167,16 +168,23 @@ fn main() -> anyhow::Result<()> {
     let mut handler = EventHandler::new(timer, &config.default_mode, delay, build_client());
     let vendor = u16::from_str_radix(vendor.unwrap_or_default().trim_start_matches("0x"), 16).unwrap_or(0x1234);
     let product = u16::from_str_radix(product.unwrap_or_default().trim_start_matches("0x"), 16).unwrap_or(0x5678);
+   
     let output_device = match output_device(
-        input_devices.values().next().map(InputDevice::bus_type),
-        config.enable_wheel,
-        vendor,
-        product,
+    input_devices.values().next().map(InputDevice::bus_type),
+    config.enable_wheel,
+    vendor,
+    product,
     ) {
         Ok(output_device) => output_device,
         Err(e) => bail!("Failed to prepare an output device: {}", e),
     };
-    let mut dispatcher = ActionDispatcher::new(output_device);
+
+    // Create WMClient and interpreter for AHK features
+    let mut wm_client = build_client();
+    let mut interpreter = AhkInterpreter::new(&mut wm_client);
+
+    // Create dispatcher with access to interpreter
+    let mut dispatcher = ActionDispatcher::new(output_device, &mut interpreter);
 
     // Main loop
     loop {

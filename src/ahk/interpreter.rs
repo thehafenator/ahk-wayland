@@ -1,10 +1,11 @@
 use crate::action::Action;
 use crate::ahk::types::{AhkAction, WindowCriteria};
 use crate::client::WMClient;
-use crate::event::{KeyEvent, KeyValue};  // Add KeyEvent and KeyValue here
+use crate::event::{KeyEvent, KeyValue};
 use evdev::KeyCode as Key;
 use std::error::Error;
 use std::time::Duration;
+use std::collections::HashSet;
 
 /// The AHK Runtime Interpreter
 /// Executes AHK actions at runtime, similar to AutoHotkey's script engine
@@ -12,6 +13,8 @@ pub struct AhkInterpreter<'a> {
     wm_client: &'a mut WMClient,
     application_cache: Option<String>,
     title_cache: Option<String>,
+    // Track which virtual modifiers are currently held (passed from event_handler)
+    active_virtual_modifiers: HashSet<Key>,
 }
 
 impl<'a> AhkInterpreter<'a> {
@@ -20,7 +23,14 @@ impl<'a> AhkInterpreter<'a> {
             wm_client,
             application_cache: None,
             title_cache: None,
+            active_virtual_modifiers: HashSet::new(),
         }
+    }
+
+    // Called by event_handler before executing hotkey action
+    pub fn set_virtual_modifiers(&mut self, modifiers: &[Key]) {
+        self.active_virtual_modifiers = modifiers.iter().copied().collect();
+        eprintln!("DEBUG: Set active virtual modifiers: {:?}", self.active_virtual_modifiers);
     }
 
     /// Execute an AHK action and return the resulting low-level Actions
@@ -46,24 +56,43 @@ impl<'a> AhkInterpreter<'a> {
                 actions.push(Action::Command(cmd));
             }
 
-            // AhkAction::Send(keys) => {
-            //     // Use ydotool for Wayland compatibility
-            //     eprintln!("DEBUG INTERPRETER: Converting Send('{}') to ydotool command", keys);
-            //     let ydotool_cmd = self.convert_send_to_ydotool(keys);
-            //     actions.push(Action::Command(ydotool_cmd));
-            // }
             AhkAction::Send(keys) => {
-    eprintln!("DEBUG INTERPRETER: Converting Send('{}') to internal actions", keys);
-    let send_actions = self.convert_send_to_actions(keys);
-    actions.extend(send_actions);
-}
+                eprintln!("DEBUG INTERPRETER: Converting Send('{}') with virtual modifiers: {:?}", 
+                    keys, self.active_virtual_modifiers);
+                
+                // CRITICAL: Release virtual modifiers before sending anything
+                // This prevents CapsLock (or other virtual modifiers) from interfering
+                for modifier in &self.active_virtual_modifiers {
+                    eprintln!("DEBUG: Releasing virtual modifier: {:?}", modifier);
+                    actions.push(Action::KeyEvent(KeyEvent::new(*modifier, KeyValue::Release)));
+                }
+                
+                // Send the actual keys
+                let send_actions = self.convert_send_to_actions(keys);
+                actions.extend(send_actions);
+                
+                // Re-press virtual modifiers so they're still "held" for next combo
+                for modifier in &self.active_virtual_modifiers {
+                    eprintln!("DEBUG: Re-pressing virtual modifier: {:?}", modifier);
+                    actions.push(Action::KeyEvent(KeyEvent::new(*modifier, KeyValue::Press)));
+                }
+            }
 
-AhkAction::Remap(target_keys) => {
-    for key in target_keys {
-        actions.push(Action::KeyEvent(KeyEvent::new(*key, KeyValue::Press)));
-        actions.push(Action::KeyEvent(KeyEvent::new(*key, KeyValue::Release)));
-    }
-}
+            AhkAction::Remap(target_keys) => {
+                // Same fix for Remap
+                for modifier in &self.active_virtual_modifiers {
+                    actions.push(Action::KeyEvent(KeyEvent::new(*modifier, KeyValue::Release)));
+                }
+                
+                for key in target_keys {
+                    actions.push(Action::KeyEvent(KeyEvent::new(*key, KeyValue::Press)));
+                    actions.push(Action::KeyEvent(KeyEvent::new(*key, KeyValue::Release)));
+                }
+                
+                for modifier in &self.active_virtual_modifiers {
+                    actions.push(Action::KeyEvent(KeyEvent::new(*modifier, KeyValue::Press)));
+                }
+            }
 
             AhkAction::Sleep(ms) => {
                 actions.push(Action::Delay(Duration::from_millis(*ms)));
@@ -113,7 +142,8 @@ AhkAction::Remap(target_keys) => {
                     }
                 }
             }
-                        AhkAction::WinWaitActive { criteria, timeout_ms } => {
+
+            AhkAction::WinWaitActive { criteria, timeout_ms } => {
                 // WinWaitActive blocks until window is active
                 let poll_interval_ms = 50;
                 
@@ -146,413 +176,237 @@ AhkAction::Remap(target_keys) => {
                     }
                 }
             }
-            
         }
 
         Ok(())
     }
 
     fn check_window_active(&mut self, criteria: &WindowCriteria) -> Result<bool, Box<dyn Error>> {
-    // FORCE fresh check - clear cache
-    self.application_cache = None;
-    self.title_cache = None;
-    
-    // Small delay to allow WM to update (if WinActivate was just called)
-    std::thread::sleep(std::time::Duration::from_millis(50));
-
-    match criteria {
-        WindowCriteria::Exe(exe) => {
-            // Get FRESH window class
-            let window_class = self.wm_client.current_application()
-                .or_else(|| {
-                    // Fallback to kdotool
-                    std::process::Command::new("kdotool")
-                        .arg("getactivewindow")
-                        .arg("getwindowclassname")
-                        .output()
-                        .ok()
-                        .and_then(|out| {
-                            if out.status.success() {
-                                Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
-                            } else {
-                                None
-                            }
-                        })
-                })
-                .unwrap_or_default();
-            
-            eprintln!("DEBUG: Checking if '{}' == '{}'", window_class, exe);
-            Ok(window_class == *exe)
-        }
+        // FORCE fresh check - clear cache
+        self.application_cache = None;
+        self.title_cache = None;
         
-        WindowCriteria::Class(class) => {
-            let window_class = self.wm_client.current_application()
-                .or_else(|| {
-                    std::process::Command::new("kdotool")
-                        .arg("getactivewindow")
-                        .arg("getwindowclassname")
-                        .output()
-                        .ok()
-                        .and_then(|out| {
-                            if out.status.success() {
-                                Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
-                            } else {
-                                None
-                            }
-                        })
-                })
-                .unwrap_or_default();
+        // Small delay to allow WM to update (if WinActivate was just called)
+        std::thread::sleep(std::time::Duration::from_millis(50));
 
-            eprintln!("DEBUG: Checking if '{}' == '{}'", window_class, class);
-            Ok(window_class == *class)
-        }
+        match criteria {
+            WindowCriteria::Exe(exe) => {
+                // Get FRESH window class
+                let window_class = self.wm_client.current_application()
+                    .or_else(|| {
+                        // Fallback to kdotool
+                        std::process::Command::new("kdotool")
+                            .arg("getactivewindow")
+                            .arg("getwindowclassname")
+                            .output()
+                            .ok()
+                            .and_then(|out| {
+                                if out.status.success() {
+                                    Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+                                } else {
+                                    None
+                                }
+                            })
+                    })
+                    .unwrap_or_default();
+                
+                eprintln!("DEBUG: Checking if '{}' == '{}'", window_class, exe);
+                Ok(window_class == *exe)
+            }
+            
+            WindowCriteria::Class(class) => {
+                let window_class = self.wm_client.current_application()
+                    .or_else(|| {
+                        std::process::Command::new("kdotool")
+                            .arg("getactivewindow")
+                            .arg("getwindowclassname")
+                            .output()
+                            .ok()
+                            .and_then(|out| {
+                                if out.status.success() {
+                                    Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+                                } else {
+                                    None
+                                }
+                            })
+                    })
+                    .unwrap_or_default();
 
-        WindowCriteria::Title(title) => {
-            let window_title = self.wm_client.current_window()
-                .or_else(|| {
-                    std::process::Command::new("kdotool")
-                        .arg("getactivewindow")
-                        .arg("getwindowname")
-                        .output()
-                        .ok()
-                        .and_then(|out| {
-                            if out.status.success() {
-                                Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
-                            } else {
-                                None
-                            }
-                        })
-                })
-                .unwrap_or_default();
+                eprintln!("DEBUG: Checking if '{}' == '{}'", window_class, class);
+                Ok(window_class == *class)
+            }
 
-            eprintln!("DEBUG: Checking if '{}' == '{}'", window_title, title);
-            Ok(window_title == *title)
+            WindowCriteria::Title(title) => {
+                let window_title = self.wm_client.current_window()
+                    .or_else(|| {
+                        std::process::Command::new("kdotool")
+                            .arg("getactivewindow")
+                            .arg("getwindowname")
+                            .output()
+                            .ok()
+                            .and_then(|out| {
+                                if out.status.success() {
+                                    Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+                                } else {
+                                    None
+                                }
+                            })
+                    })
+                    .unwrap_or_default();
+
+                eprintln!("DEBUG: Checking if '{}' == '{}'", window_title, title);
+                Ok(window_title == *title)
+            }
         }
     }
-}
 
-    // /// Check if a window matching the criteria is currently active
-    // fn check_window_active(&mut self, criteria: &WindowCriteria) -> Result<bool, Box<dyn Error>> {
-    //     // Clear cache for fresh check
-    //     self.application_cache = None;
-    //     self.title_cache = None;
-
-    //     match criteria {
-    //         WindowCriteria::Exe(exe) => {
-    //             // Get the current window class
-    //             let window_class = if let Some(cached) = &self.application_cache {
-    //                 cached.clone()
-    //             } else {
-    //                 let class = self.wm_client.current_application()
-    //                     .or_else(|| {
-    //                         // Fallback to kdotool
-    //                         std::process::Command::new("kdotool")
-    //                             .arg("getactivewindow")
-    //                             .arg("getwindowclassname")
-    //                             .output()
-    //                             .ok()
-    //                             .and_then(|out| {
-    //                                 if out.status.success() {
-    //                                     Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
-    //                                 } else {
-    //                                     None
-    //                                 }
-    //                             })
-    //                     })
-    //                     .unwrap_or_default();
-                    
-    //                 self.application_cache = Some(class.clone());
-    //                 class
-    //             };
-
-    //             Ok(window_class == *exe)
-    //         }
-            
-    //         WindowCriteria::Class(class) => {
-    //             // Get the current window class
-    //             let window_class = if let Some(cached) = &self.application_cache {
-    //                 cached.clone()
-    //             } else {
-    //                 let wclass = self.wm_client.current_application()
-    //                     .or_else(|| {
-    //                         // Fallback to kdotool
-    //                         std::process::Command::new("kdotool")
-    //                             .arg("getactivewindow")
-    //                             .arg("getwindowclassname")
-    //                             .output()
-    //                             .ok()
-    //                             .and_then(|out| {
-    //                                 if out.status.success() {
-    //                                     Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
-    //                                 } else {
-    //                                     None
-    //                                 }
-    //                             })
-    //                     })
-    //                     .unwrap_or_default();
-                    
-    //                 self.application_cache = Some(wclass.clone());
-    //                 wclass
-    //             };
-
-    //             Ok(window_class == *class)
-    //         }
-
-    //         WindowCriteria::Title(title) => {
-    //             // Get the current window title
-    //             let window_title = if let Some(cached) = &self.title_cache {
-    //                 cached.clone()
-    //             } else {
-    //                 let title = self.wm_client.current_window()
-    //                     .or_else(|| {
-    //                         // Fallback to kdotool
-    //                         std::process::Command::new("kdotool")
-    //                             .arg("getactivewindow")
-    //                             .arg("getwindowname")
-    //                             .output()
-    //                             .ok()
-    //                             .and_then(|out| {
-    //                                 if out.status.success() {
-    //                                     Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
-    //                                 } else {
-    //                                     None
-    //                                 }
-    //                             })
-    //                     })
-    //                     .unwrap_or_default();
-                    
-    //                 self.title_cache = Some(title.clone());
-    //                 title
-    //             };
-
-    //             Ok(window_title == *title)
-    //         }
-    //     }
-    // }
-
-
-fn convert_send_to_actions(&self, send_str: &str) -> Vec<Action> {
-    use crate::ahk::send_parser::{parse_send_string, SendToken};
-    use crate::event::{KeyEvent, KeyValue};
-    
-    let tokens = parse_send_string(send_str);
-    let mut actions = Vec::new();
-    
-    for token in tokens {
-        match token {
-            SendToken::Text(text) => {
-                for ch in text.chars() {
-                    if let Some((key, needs_shift)) = self.char_to_key_with_shift(ch) {
-                        if needs_shift {
-                            // Press Shift
-                            actions.push(Action::KeyEvent(KeyEvent::new(
-                                Key::KEY_LEFTSHIFT, 
-                                KeyValue::Press
-                            )));
-                        }
-                        
-                        // Press and release the key
-                        actions.push(Action::KeyEvent(KeyEvent::new(key, KeyValue::Press)));
-                        actions.push(Action::KeyEvent(KeyEvent::new(key, KeyValue::Release)));
-                        
-                        if needs_shift {
-                            // Release Shift
-                            actions.push(Action::KeyEvent(KeyEvent::new(
-                                Key::KEY_LEFTSHIFT, 
-                                KeyValue::Release
-                            )));
+    fn convert_send_to_actions(&self, send_str: &str) -> Vec<Action> {
+        use crate::ahk::send_parser::{parse_send_string, SendToken};
+        use crate::event::{KeyEvent, KeyValue};
+        
+        let tokens = parse_send_string(send_str);
+        let mut actions = Vec::new();
+        
+        for token in tokens {
+            match token {
+                SendToken::Text(text) => {
+                    for ch in text.chars() {
+                        if let Some((key, needs_shift)) = self.char_to_key_with_shift(ch) {
+                            if needs_shift {
+                                // Press Shift
+                                actions.push(Action::KeyEvent(KeyEvent::new(
+                                    Key::KEY_LEFTSHIFT, 
+                                    KeyValue::Press
+                                )));
+                            }
+                            
+                            // Press and release the key
+                            actions.push(Action::KeyEvent(KeyEvent::new(key, KeyValue::Press)));
+                            actions.push(Action::KeyEvent(KeyEvent::new(key, KeyValue::Release)));
+                            
+                            if needs_shift {
+                                // Release Shift
+                                actions.push(Action::KeyEvent(KeyEvent::new(
+                                    Key::KEY_LEFTSHIFT, 
+                                    KeyValue::Release
+                                )));
+                            }
                         }
                     }
                 }
-            }
-            SendToken::Key { key, modifiers } => {
-                // Press modifiers
-                for modifier in &modifiers {
-                    actions.push(Action::KeyEvent(KeyEvent::new(*modifier, KeyValue::Press)));
+                SendToken::Key { key, modifiers } => {
+                    // Press modifiers
+                    for modifier in &modifiers {
+                        actions.push(Action::KeyEvent(KeyEvent::new(*modifier, KeyValue::Press)));
+                    }
+                    // Press/release main key
+                    actions.push(Action::KeyEvent(KeyEvent::new(key, KeyValue::Press)));
+                    actions.push(Action::KeyEvent(KeyEvent::new(key, KeyValue::Release)));
+                    // Release modifiers
+                    for modifier in modifiers.iter().rev() {
+                        actions.push(Action::KeyEvent(KeyEvent::new(*modifier, KeyValue::Release)));
+                    }
                 }
-                // Press/release main key
-                actions.push(Action::KeyEvent(KeyEvent::new(key, KeyValue::Press)));
-                actions.push(Action::KeyEvent(KeyEvent::new(key, KeyValue::Release)));
-                // Release modifiers
-                for modifier in modifiers.iter().rev() {
-                    actions.push(Action::KeyEvent(KeyEvent::new(*modifier, KeyValue::Release)));
-                }
             }
         }
+        
+        actions
     }
-    
-    actions
-}
 
-fn char_to_key(&self, ch: char) -> Option<Key> {
-    match ch {
-        // Letters - lowercase
-        'a' => Some(Key::KEY_A),
-        'b' => Some(Key::KEY_B),
-        'c' => Some(Key::KEY_C),
-        'd' => Some(Key::KEY_D),
-        'e' => Some(Key::KEY_E),
-        'f' => Some(Key::KEY_F),
-        'g' => Some(Key::KEY_G),
-        'h' => Some(Key::KEY_H),
-        'i' => Some(Key::KEY_I),
-        'j' => Some(Key::KEY_J),
-        'k' => Some(Key::KEY_K),
-        'l' => Some(Key::KEY_L),
-        'm' => Some(Key::KEY_M),
-        'n' => Some(Key::KEY_N),
-        'o' => Some(Key::KEY_O),
-        'p' => Some(Key::KEY_P),
-        'q' => Some(Key::KEY_Q),
-        'r' => Some(Key::KEY_R),
-        's' => Some(Key::KEY_S),
-        't' => Some(Key::KEY_T),
-        'u' => Some(Key::KEY_U),
-        'v' => Some(Key::KEY_V),
-        'w' => Some(Key::KEY_W),
-        'x' => Some(Key::KEY_X),
-        'y' => Some(Key::KEY_Y),
-        'z' => Some(Key::KEY_Z),
-        
-        // Numbers
-        '0' => Some(Key::KEY_0),
-        '1' => Some(Key::KEY_1),
-        '2' => Some(Key::KEY_2),
-        '3' => Some(Key::KEY_3),
-        '4' => Some(Key::KEY_4),
-        '5' => Some(Key::KEY_5),
-        '6' => Some(Key::KEY_6),
-        '7' => Some(Key::KEY_7),
-        '8' => Some(Key::KEY_8),
-        '9' => Some(Key::KEY_9),
-        
-        // Common punctuation/symbols
-        ' ' => Some(Key::KEY_SPACE),
-        '.' => Some(Key::KEY_DOT),
-        ',' => Some(Key::KEY_COMMA),
-        ';' => Some(Key::KEY_SEMICOLON),
-        '/' => Some(Key::KEY_SLASH),
-        '\'' => Some(Key::KEY_APOSTROPHE),
-        '-' => Some(Key::KEY_MINUS),
-        '=' => Some(Key::KEY_EQUAL),
-        '[' => Some(Key::KEY_LEFTBRACE),
-        ']' => Some(Key::KEY_RIGHTBRACE),
-        '\\' => Some(Key::KEY_BACKSLASH),
-        '`' => Some(Key::KEY_GRAVE),
-        '\n' => Some(Key::KEY_ENTER),
-        '\t' => Some(Key::KEY_TAB),
-        
-        // Uppercase letters need Shift modifier
-        'A'..='Z' => {
-            // For now, return None - we'll handle uppercase differently
-            None
+    fn char_to_key_with_shift(&self, ch: char) -> Option<(Key, bool)> {
+        // Returns (Key, needs_shift)
+        match ch {
+            // Lowercase letters - no shift
+            'a'..='z' => {
+                let key = match ch {
+                    'a' => Key::KEY_A, 'b' => Key::KEY_B, 'c' => Key::KEY_C,
+                    'd' => Key::KEY_D, 'e' => Key::KEY_E, 'f' => Key::KEY_F,
+                    'g' => Key::KEY_G, 'h' => Key::KEY_H, 'i' => Key::KEY_I,
+                    'j' => Key::KEY_J, 'k' => Key::KEY_K, 'l' => Key::KEY_L,
+                    'm' => Key::KEY_M, 'n' => Key::KEY_N, 'o' => Key::KEY_O,
+                    'p' => Key::KEY_P, 'q' => Key::KEY_Q, 'r' => Key::KEY_R,
+                    's' => Key::KEY_S, 't' => Key::KEY_T, 'u' => Key::KEY_U,
+                    'v' => Key::KEY_V, 'w' => Key::KEY_W, 'x' => Key::KEY_X,
+                    'y' => Key::KEY_Y, 'z' => Key::KEY_Z,
+                    _ => return None,
+                };
+                Some((key, false))
+            }
+            
+            // Uppercase letters - need shift
+            'A'..='Z' => {
+                let key = match ch {
+                    'A' => Key::KEY_A, 'B' => Key::KEY_B, 'C' => Key::KEY_C,
+                    'D' => Key::KEY_D, 'E' => Key::KEY_E, 'F' => Key::KEY_F,
+                    'G' => Key::KEY_G, 'H' => Key::KEY_H, 'I' => Key::KEY_I,
+                    'J' => Key::KEY_J, 'K' => Key::KEY_K, 'L' => Key::KEY_L,
+                    'M' => Key::KEY_M, 'N' => Key::KEY_N, 'O' => Key::KEY_O,
+                    'P' => Key::KEY_P, 'Q' => Key::KEY_Q, 'R' => Key::KEY_R,
+                    'S' => Key::KEY_S, 'T' => Key::KEY_T, 'U' => Key::KEY_U,
+                    'V' => Key::KEY_V, 'W' => Key::KEY_W, 'X' => Key::KEY_X,
+                    'Y' => Key::KEY_Y, 'Z' => Key::KEY_Z,
+                    _ => return None,
+                };
+                Some((key, true))
+            }
+            
+            // Numbers - no shift
+            '0' => Some((Key::KEY_0, false)),
+            '1' => Some((Key::KEY_1, false)),
+            '2' => Some((Key::KEY_2, false)),
+            '3' => Some((Key::KEY_3, false)),
+            '4' => Some((Key::KEY_4, false)),
+            '5' => Some((Key::KEY_5, false)),
+            '6' => Some((Key::KEY_6, false)),
+            '7' => Some((Key::KEY_7, false)),
+            '8' => Some((Key::KEY_8, false)),
+            '9' => Some((Key::KEY_9, false)),
+            
+            // Shifted number symbols
+            '!' => Some((Key::KEY_1, true)),
+            '@' => Some((Key::KEY_2, true)),
+            '#' => Some((Key::KEY_3, true)),
+            '$' => Some((Key::KEY_4, true)),
+            '%' => Some((Key::KEY_5, true)),
+            '^' => Some((Key::KEY_6, true)),
+            '&' => Some((Key::KEY_7, true)),
+            '*' => Some((Key::KEY_8, true)),
+            '(' => Some((Key::KEY_9, true)),
+            ')' => Some((Key::KEY_0, true)),
+            
+            // Punctuation
+            ' ' => Some((Key::KEY_SPACE, false)),
+            '.' => Some((Key::KEY_DOT, false)),
+            ',' => Some((Key::KEY_COMMA, false)),
+            ';' => Some((Key::KEY_SEMICOLON, false)),
+            '/' => Some((Key::KEY_SLASH, false)),
+            '\'' => Some((Key::KEY_APOSTROPHE, false)),
+            '-' => Some((Key::KEY_MINUS, false)),
+            '=' => Some((Key::KEY_EQUAL, false)),
+            '[' => Some((Key::KEY_LEFTBRACE, false)),
+            ']' => Some((Key::KEY_RIGHTBRACE, false)),
+            '\\' => Some((Key::KEY_BACKSLASH, false)),
+            '`' => Some((Key::KEY_GRAVE, false)),
+            
+            // Shifted punctuation
+            ':' => Some((Key::KEY_SEMICOLON, true)),
+            '?' => Some((Key::KEY_SLASH, true)),
+            '"' => Some((Key::KEY_APOSTROPHE, true)),
+            '_' => Some((Key::KEY_MINUS, true)),
+            '+' => Some((Key::KEY_EQUAL, true)),
+            '{' => Some((Key::KEY_LEFTBRACE, true)),
+            '}' => Some((Key::KEY_RIGHTBRACE, true)),
+            '|' => Some((Key::KEY_BACKSLASH, true)),
+            '~' => Some((Key::KEY_GRAVE, true)),
+            '<' => Some((Key::KEY_COMMA, true)),
+            '>' => Some((Key::KEY_DOT, true)),
+            
+            '\n' => Some((Key::KEY_ENTER, false)),
+            '\t' => Some((Key::KEY_TAB, false)),
+            
+            _ => None,
         }
-        
-        // Shifted symbols need special handling
-        '!' | '@' | '#' | '$' | '%' | '^' | '&' | '*' | '(' | ')' |
-        '_' | '+' | '{' | '}' | '|' | ':' | '"' | '<' | '>' | '?' | '~' => {
-            // Return None for now - needs shift handling
-            None
-        }
-        
-        _ => None,
     }
-}
-
-fn char_to_key_with_shift(&self, ch: char) -> Option<(Key, bool)> {
-    // Returns (Key, needs_shift)
-    match ch {
-        // Lowercase letters - no shift
-        'a'..='z' => {
-            let key = match ch {
-                'a' => Key::KEY_A, 'b' => Key::KEY_B, 'c' => Key::KEY_C,
-                'd' => Key::KEY_D, 'e' => Key::KEY_E, 'f' => Key::KEY_F,
-                'g' => Key::KEY_G, 'h' => Key::KEY_H, 'i' => Key::KEY_I,
-                'j' => Key::KEY_J, 'k' => Key::KEY_K, 'l' => Key::KEY_L,
-                'm' => Key::KEY_M, 'n' => Key::KEY_N, 'o' => Key::KEY_O,
-                'p' => Key::KEY_P, 'q' => Key::KEY_Q, 'r' => Key::KEY_R,
-                's' => Key::KEY_S, 't' => Key::KEY_T, 'u' => Key::KEY_U,
-                'v' => Key::KEY_V, 'w' => Key::KEY_W, 'x' => Key::KEY_X,
-                'y' => Key::KEY_Y, 'z' => Key::KEY_Z,
-                _ => return None,
-            };
-            Some((key, false))
-        }
-        
-        // Uppercase letters - need shift
-        'A'..='Z' => {
-            let key = match ch {
-                'A' => Key::KEY_A, 'B' => Key::KEY_B, 'C' => Key::KEY_C,
-                'D' => Key::KEY_D, 'E' => Key::KEY_E, 'F' => Key::KEY_F,
-                'G' => Key::KEY_G, 'H' => Key::KEY_H, 'I' => Key::KEY_I,
-                'J' => Key::KEY_J, 'K' => Key::KEY_K, 'L' => Key::KEY_L,
-                'M' => Key::KEY_M, 'N' => Key::KEY_N, 'O' => Key::KEY_O,
-                'P' => Key::KEY_P, 'Q' => Key::KEY_Q, 'R' => Key::KEY_R,
-                'S' => Key::KEY_S, 'T' => Key::KEY_T, 'U' => Key::KEY_U,
-                'V' => Key::KEY_V, 'W' => Key::KEY_W, 'X' => Key::KEY_X,
-                'Y' => Key::KEY_Y, 'Z' => Key::KEY_Z,
-                _ => return None,
-            };
-            Some((key, true))
-        }
-        
-        // Numbers - no shift
-        '0' => Some((Key::KEY_0, false)),
-        '1' => Some((Key::KEY_1, false)),
-        '2' => Some((Key::KEY_2, false)),
-        '3' => Some((Key::KEY_3, false)),
-        '4' => Some((Key::KEY_4, false)),
-        '5' => Some((Key::KEY_5, false)),
-        '6' => Some((Key::KEY_6, false)),
-        '7' => Some((Key::KEY_7, false)),
-        '8' => Some((Key::KEY_8, false)),
-        '9' => Some((Key::KEY_9, false)),
-        
-        // Shifted number symbols
-        '!' => Some((Key::KEY_1, true)),
-        '@' => Some((Key::KEY_2, true)),
-        '#' => Some((Key::KEY_3, true)),
-        '$' => Some((Key::KEY_4, true)),
-        '%' => Some((Key::KEY_5, true)),
-        '^' => Some((Key::KEY_6, true)),
-        '&' => Some((Key::KEY_7, true)),
-        '*' => Some((Key::KEY_8, true)),
-        '(' => Some((Key::KEY_9, true)),
-        ')' => Some((Key::KEY_0, true)),
-        
-        // Punctuation
-        ' ' => Some((Key::KEY_SPACE, false)),
-        '.' => Some((Key::KEY_DOT, false)),
-        ',' => Some((Key::KEY_COMMA, false)),
-        ';' => Some((Key::KEY_SEMICOLON, false)),
-        '/' => Some((Key::KEY_SLASH, false)),
-        '\'' => Some((Key::KEY_APOSTROPHE, false)),
-        '-' => Some((Key::KEY_MINUS, false)),
-        '=' => Some((Key::KEY_EQUAL, false)),
-        '[' => Some((Key::KEY_LEFTBRACE, false)),
-        ']' => Some((Key::KEY_RIGHTBRACE, false)),
-        '\\' => Some((Key::KEY_BACKSLASH, false)),
-        '`' => Some((Key::KEY_GRAVE, false)),
-        
-        // Shifted punctuation
-        ':' => Some((Key::KEY_SEMICOLON, true)),
-        '?' => Some((Key::KEY_SLASH, true)),
-        '"' => Some((Key::KEY_APOSTROPHE, true)),
-        '_' => Some((Key::KEY_MINUS, true)),
-        '+' => Some((Key::KEY_EQUAL, true)),
-        '{' => Some((Key::KEY_LEFTBRACE, true)),
-        '}' => Some((Key::KEY_RIGHTBRACE, true)),
-        '|' => Some((Key::KEY_BACKSLASH, true)),
-        '~' => Some((Key::KEY_GRAVE, true)),
-        '<' => Some((Key::KEY_COMMA, true)),
-        '>' => Some((Key::KEY_DOT, true)),
-        
-        '\n' => Some((Key::KEY_ENTER, false)),
-        '\t' => Some((Key::KEY_TAB, false)),
-        
-        _ => None,
-    }
-}
 
     fn build_kdotool_command(&self, action: &str, criteria: &WindowCriteria) -> Vec<String> {
         let mut cmd = vec!["kdotool".to_string(), "search".to_string()];
@@ -574,15 +428,5 @@ fn char_to_key_with_shift(&self, ch: char) -> Option<(Key, bool)> {
         
         cmd.push(action.to_string());
         cmd
-    }
-
-    fn build_kdotool_shell(&self, criteria: &WindowCriteria, action: &str) -> String {
-        let search_arg = match criteria {
-            WindowCriteria::Title(title) => format!("--name '{}'", title.replace("'", "'\\''")),
-            WindowCriteria::Class(class) => format!("--class '{}'", class.replace("'", "'\\''")),
-            WindowCriteria::Exe(exe) => format!("--classname '{}'", exe.replace("'", "'\\''")),
-        };
-        
-        format!("kdotool search {} {}", search_arg, action)
     }
 }

@@ -26,4 +26,9 @@ pub enum Action {
         replacement: String,
         add_space: bool,
     },
+    //     HotstringExpansion {
+    //     trigger_len: usize,
+    //     replacement: String,
+    //     add_space: bool,
+    // },
 }
