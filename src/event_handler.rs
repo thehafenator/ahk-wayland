@@ -231,143 +231,159 @@ impl EventHandler {
             _ => None,
         }
     }
-
     fn on_key_event(
-        &mut self,
-        event: &KeyEvent,
-        config: &Config,
-        device: &InputDeviceInfo,
-    ) -> Result<bool, Box<dyn Error>> {
-        self.application_cache = None; // expire cache
-        self.title_cache = None; // expire cache
-        let key = Key::new(event.code());
-        println!("Looking for key: {:?}, modifiers: {:?}", key, self.modifiers);
+    &mut self,
+    event: &KeyEvent,
+    config: &Config,
+    device: &InputDeviceInfo,
+) -> Result<bool, Box<dyn Error>> {
+    self.application_cache = None; // expire cache
+    self.title_cache = None; // expire cache
+    let key = Key::new(event.code());
+    
+    // DEBUG BLOCK 1: Check if matcher exists
+    eprintln!("═══ KEY EVENT: {:?}, value: {} ═══", key, event.value());
+    eprintln!("DEBUG 1: hotstring_matcher exists: {}", config.hotstring_matcher.is_some());
+    eprintln!("DEBUG 1b: modifiers: {:?}", self.modifiers);
+    
+    println!("Looking for key: {:?}, modifiers: {:?}", key, self.modifiers);
 
-        if key.code() < DISGUISED_EVENT_OFFSETTER {
-            debug!("=> {}: {:?}", event.value(), &key);
+    if key.code() < DISGUISED_EVENT_OFFSETTER {
+        debug!("=> {}: {:?}", event.value(), &key);
+    }
+
+    // Apply modmap
+    let mut key_values = if let Some(key_action) = self.find_modmap(config, &key, device) {
+        self.dispatch_keys(key_action, key, event.value(), config)?
+    } else {
+        vec![(key, event.value())]
+    };
+    self.maintain_pressed_keys(key, event.value(), &mut key_values);
+    if !self.multi_purpose_keys.is_empty() {
+        key_values = self.flush_timeout_keys(key_values);
+    }
+
+    let mut send_original_relative_event = false;
+
+    // Apply keymap
+    for (key, value) in key_values.into_iter() {
+        // Handle virtual modifiers
+        if config.virtual_modifiers.contains(&key) {
+            self.update_modifier(key, value);
+            continue;
         }
-
-        // Apply modmap
-        let mut key_values = if let Some(key_action) = self.find_modmap(config, &key, device) {
-            self.dispatch_keys(key_action, key, event.value(), config)?
-        } else {
-            vec![(key, event.value())]
-        };
-        self.maintain_pressed_keys(key, event.value(), &mut key_values);
-        if !self.multi_purpose_keys.is_empty() {
-            key_values = self.flush_timeout_keys(key_values);
+        
+        // Handle real modifier keys - update state AND send the key
+        if MODIFIER_KEYS.contains(&key) {
+            self.update_modifier(key, value);
+            self.send_key(&key, value);
+            continue;
         }
+        
+        // Handle non-modifier keys
+        if is_pressed(value) {
+            if self.escape_next_key {
+                self.escape_next_key = false;
+            }
 
-        let mut send_original_relative_event = false;
+            // DEBUG BLOCK 2: Before keymap check
+            eprintln!("DEBUG 2: About to check keymap for {:?}", key);
 
-        // Apply keymap
-        for (key, value) in key_values.into_iter() {
-            // Handle virtual modifiers
-            if config.virtual_modifiers.contains(&key) {
-                self.update_modifier(key, value);
+            // === 1. FIRST: Check regular hotkeys (including ^t, Ctrl+anything, etc.) ===
+            else if let Some(actions) = self.find_keymap(config, &key, device)? {
+                eprintln!("DEBUG 2b: Found keymap action - hotstring will be SKIPPED");
+                self.dispatch_actions(&actions, &key, config)?;
                 continue;
             }
             
-            // Handle real modifier keys - update state AND send the key
-            if MODIFIER_KEYS.contains(&key) {
-                self.update_modifier(key, value);
-                self.send_key(&key, value);
+            eprintln!("DEBUG 2c: No keymap found - proceeding to hotstring check");
+            
+            if let Some(actions) = self.find_keymap(config, &KEY_MATCH_ANY, device)? {
+                self.dispatch_actions(&actions, &KEY_MATCH_ANY, config)?;
                 continue;
             }
-            
-            // Handle non-modifier keys
-            if is_pressed(value) {
-                if self.escape_next_key {
-                    self.escape_next_key = false;
-                }
 
-                // === 1. FIRST: Check regular hotkeys (including ^t, Ctrl+anything, etc.) ===
-                else if let Some(actions) = self.find_keymap(config, &key, device)? {
-                    self.dispatch_actions(&actions, &key, config)?;
-                    continue;
-                }
-                if let Some(actions) = self.find_keymap(config, &KEY_MATCH_ANY, device)? {
-                    self.dispatch_actions(&actions, &KEY_MATCH_ANY, config)?;
-                    continue;
-                }
+            // === 2. SECOND: Only if no hotkey matched – process hotstrings ===
+            if let Some(matcher) = &config.hotstring_matcher {
+                // DEBUG BLOCK 3: Inside hotstring block
+                eprintln!("DEBUG 3: Inside hotstring block, trying key_to_char for {:?}", key);
+                
+                match self.key_to_char(&key) {
+                    Some(ch) => {
+                        eprintln!("DEBUG 3b: Got char '{}' from key", ch);
+                        // Valid character - process through matcher
+                        self.hotstring_buffer.push_str(&ch);
+                        let (new_state, matched) = matcher.process(self.hotstring_state.as_ref(), &ch);
+                        self.hotstring_state = Some(new_state);
 
-                // === 2. SECOND: Only if no hotkey matched – process hotstrings ===
-                if let Some(matcher) = &config.hotstring_matcher {
-                    match self.key_to_char(&key) {
-                        Some(ch) => {
-                            // Valid character - process through matcher
-                            self.hotstring_buffer.push_str(&ch);
-                            let (new_state, matched) = matcher.process(self.hotstring_state.as_ref(), &ch);
-                            self.hotstring_state = Some(new_state);
+                        if let Some(hotstring_match) = matched {
+                            eprintln!("DEBUG 3c: HOTSTRING MATCHED! trigger: '{}', replacement: '{}'", 
+                                hotstring_match.trigger, hotstring_match.replacement);
+                            // Delete just the trigger
+                            let chars_to_delete = hotstring_match.trigger.len();
 
-                            if let Some(hotstring_match) = matched {
-                                // Delete just the trigger
-                                let chars_to_delete = hotstring_match.trigger.len();
-
-                                if hotstring_match.execute {
-                                    // X option: execute as command
-                                    for _ in 0..chars_to_delete {
-                                        self.send_key(&Key::KEY_BACKSPACE, PRESS);
-                                        self.send_key(&Key::KEY_BACKSPACE, RELEASE);
-                                    }
-
-                                    if let Some(rest) = hotstring_match.replacement.strip_prefix("Run(") {
-                                        if let Some(cmd) = rest.strip_suffix(')') {
-                                            let cmd = cmd.trim().trim_matches(|c| c == '"' || c == '\'');
-                                            let command: Vec<String> = if cmd.starts_with("http://") || cmd.starts_with("https://") {
-                                                vec!["xdg-open".to_string(), cmd.to_string()]
-                                            } else {
-                                                cmd.split_whitespace().map(String::from).collect()
-                                            };
-                                            self.send_action(Action::Command(command));
-                                        }
-                                    }
-                                } else {
-                                    // // Regular text expansion ; wasn't sending ^v properly
-                                    // let final_replacement = hotstring_match.replacement.clone();
-                                    // self.send_action(Action::TextExpansion {
-                                    //     trigger_len: chars_to_delete,
-                                    //     replacement: final_replacement,
-                                    //     add_space: !hotstring_match.omit_char && !hotstring_match.immediate,
-                                    // });
-                                    // Regular text expansion using ydotool method
-                                    let final_replacement = hotstring_match.replacement.clone();
-                                    self.send_action(Action::TextExpansion {
-                                        trigger_len: chars_to_delete,
-                                        replacement: final_replacement,
-                                        add_space: !hotstring_match.omit_char && !hotstring_match.immediate,
-                                    });
+                            if hotstring_match.execute {
+                                // X option: execute as command
+                                for _ in 0..chars_to_delete {
+                                    self.send_key(&Key::KEY_BACKSPACE, PRESS);
+                                    self.send_key(&Key::KEY_BACKSPACE, RELEASE);
                                 }
 
-                                self.hotstring_buffer.clear();
-                                self.hotstring_state = None;
-                                continue; // hotstring matched – suppress original key
+                                if let Some(rest) = hotstring_match.replacement.strip_prefix("Run(") {
+                                    if let Some(cmd) = rest.strip_suffix(')') {
+                                        let cmd = cmd.trim().trim_matches(|c| c == '"' || c == '\'');
+                                        let command: Vec<String> = if cmd.starts_with("http://") || cmd.starts_with("https://") {
+                                            vec!["xdg-open".to_string(), cmd.to_string()]
+                                        } else {
+                                            cmd.split_whitespace().map(String::from).collect()
+                                        };
+                                        self.send_action(Action::Command(command));
+                                    }
+                                }
+                            } else {
+                                // Regular text expansion
+                                let final_replacement = hotstring_match.replacement.clone();
+                                self.send_action(Action::TextExpansion {
+                                    trigger_len: chars_to_delete,
+                                    replacement: final_replacement,
+                                    add_space: !hotstring_match.omit_char && !hotstring_match.immediate,
+                                });
                             }
-                        }
-                        None => {
-                            // Reset matcher on non-character keys
-                            self.hotstring_state = None;
+
                             self.hotstring_buffer.clear();
+                            self.hotstring_state = None;
+                            continue; // hotstring matched – suppress original key
                         }
                     }
+                    None => {
+                        // Reset matcher on non-character keys
+                        eprintln!("DEBUG 3d: key_to_char returned None - resetting matcher");
+                        self.hotstring_state = None;
+                        self.hotstring_buffer.clear();
+                    }
                 }
-
-                // If nothing matched above, pass through the original key
-                self.send_key(&key, value);
             } else {
-                // Release or repeat – just send
-                self.send_key(&key, value);
+                eprintln!("DEBUG 3e: No hotstring_matcher in config!");
             }
 
-            // Check for disguised relative events
-            if key.code() >= DISGUISED_EVENT_OFFSETTER && (key.code(), value) == (event.code(), event.value()) {
-                send_original_relative_event = true;
-                continue;
-            }
+            // If nothing matched above, pass through the original key
+            eprintln!("DEBUG 4: Sending original key: {:?}", key);
+            self.send_key(&key, value);
+        } else {
+            // Release or repeat – just send
+            self.send_key(&key, value);
         }
 
-        Ok(send_original_relative_event)
+        // Check for disguised relative events
+        if key.code() >= DISGUISED_EVENT_OFFSETTER && (key.code(), value) == (event.code(), event.value()) {
+            send_original_relative_event = true;
+            continue;
+        }
     }
+
+    Ok(send_original_relative_event)
+}
+
 
     // Handle EventType::RELATIVE
     fn on_relative_event(
