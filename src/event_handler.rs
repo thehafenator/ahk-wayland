@@ -290,7 +290,7 @@ impl EventHandler {
             eprintln!("DEBUG 2: About to check keymap for {:?}", key);
 
             // === 1. FIRST: Check regular hotkeys (including ^t, Ctrl+anything, etc.) ===
-            else if let Some(actions) = self.find_keymap(config, &key, device)? {
+            if let Some(actions) = self.find_keymap(config, &key, device)? {
                 eprintln!("DEBUG 2b: Found keymap action - hotstring will be SKIPPED");
                 self.dispatch_actions(&actions, &key, config)?;
                 continue;
