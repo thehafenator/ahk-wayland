@@ -5,10 +5,15 @@ use log::error;
 use nix::sys::signal;
 use nix::sys::signal::{sigaction, SaFlags, SigAction, SigHandler, SigSet};
 use std::process::{exit, Command, Stdio};
-
+// added 1.8.2026
+use std::time::Duration;                    // <--- fixes Duration error
+use crate::ahk::WaylandTextInjector;
+// end added 1.8.2026
 use crate::action::Action;
 use crate::event::{KeyEvent, KeyValue, RelativeEvent};
 use crate::ahk::interpreter::AhkInterpreter;  // add import
+
+
 
 pub struct ActionDispatcher<'a> {
     device: VirtualDevice,
@@ -42,39 +47,110 @@ pub fn new(device: VirtualDevice, interpreter: &'a mut AhkInterpreter<'a>) -> Se
             Action::Command(command) => self.run_command(command),
             Action::Delay(_) => {}   
 
-            Action::TextExpansion { trigger_len, replacement, add_space } => {
-            let final_text = if add_space {
-                format!("{}\u{00A0}", replacement)
-            } else {
-                replacement.clone()
-            };
+        //     Action::TextExpansion { trigger_len, replacement, add_space } => {
+        //     let final_text = if add_space {
+        //         format!("{}\u{00A0}", replacement)
+        //     } else {
+        //         replacement.clone()
+        //     };
 
-            // Delete trigger
-            for _ in 0..trigger_len {
-                self.on_key_event(KeyEvent::new(Key::KEY_BACKSPACE, KeyValue::Press))?;
-                self.on_key_event(KeyEvent::new(Key::KEY_BACKSPACE, KeyValue::Release))?;
-            }
+        //     // Delete trigger
+        //     for _ in 0..trigger_len {
+        //         self.on_key_event(KeyEvent::new(Key::KEY_BACKSPACE, KeyValue::Press))?;
+        //         self.on_key_event(KeyEvent::new(Key::KEY_BACKSPACE, KeyValue::Release))?;
+        //     }
 
-            // Copy to clipboard
-            crate::ahk::WaylandTextInjector::copy_to_clipboard(&final_text)?;
-            // thread::sleep(Duration::from_millis(0));
+        //     // Copy to clipboard
+        //     crate::ahk::WaylandTextInjector::copy_to_clipboard(&final_text)?;
+        //     // thread::sleep(Duration::from_millis(0));
+        //     // self.on_key_event(KeyEvent::new(Key::KEY_LEFTCTRL, KeyValue::Press))?;
+        //     // self.on_key_event(KeyEvent::new(Key::KEY_V, KeyValue::Press))?;
+        //     // self.on_key_event(KeyEvent::new(Key::KEY_V, KeyValue::Release))?;
+        //     // self.on_key_event(KeyEvent::new(Key::KEY_LEFTCTRL, KeyValue::Release))?;
+            
+        //     // Paste event using Shift Insert
+        //     // ; if not working, make sure to have wl-clipboard installed
+        //     self.on_key_event(KeyEvent::new(Key::KEY_LEFTSHIFT, KeyValue::Press))?;
+        //     self.on_key_event(KeyEvent::new(Key::KEY_INSERT, KeyValue::Press))?;
+        //     self.on_key_event(KeyEvent::new(Key::KEY_INSERT, KeyValue::Release))?;
+        //     self.on_key_event(KeyEvent::new(Key::KEY_LEFTSHIFT, KeyValue::Release))?;
+            
+            
+        //         // Restore original clipboard in background
+        //     std::thread::spawn(move || {
+        //         std::thread::sleep(std::time::Duration::from_millis(100));
+        //         let _ = crate::ahk::WaylandTextInjector::copy_to_clipboard(&original_clipboard);
+        //     });
 
-            self.on_key_event(KeyEvent::new(Key::KEY_LEFTCTRL, KeyValue::Press))?;
-            self.on_key_event(KeyEvent::new(Key::KEY_V, KeyValue::Press))?;
-            self.on_key_event(KeyEvent::new(Key::KEY_V, KeyValue::Release))?;
-            self.on_key_event(KeyEvent::new(Key::KEY_LEFTCTRL, KeyValue::Release))?;
-            // Use the same interpreter that hotkeys use
-            // ; if not working, make sure to have wl-clipboard installed
-        
-            // let paste_actions = self.interpreter
-            // .execute(&AhkAction::Send("^v".to_string()))
-            // .map_err(|e| anyhow!("AHK interpreter error: {}", e))?;
-            // for action in paste_actions {
-            //     self.on_action(action)?;  // recurse safely – only KeyEvent comes out
-            // }
+            
+        //     // Due to wayland capabilities, the interpreter cannot simulate keystrokes directly
+        //     // Use the same interpreter that hotkeys use
+        //     // let paste_actions = self.interpreter
+        //     // .execute(&AhkAction::Send("^v".to_string()))
+        //     // .map_err(|e| anyhow!("AHK interpreter error: {}", e))?;
+        //     // for action in paste_actions {
+        //     //     self.on_action(action)?;  // recurse safely – only KeyEvent comes out
+        //     // }
+        // }
+
+    //     Action::TextExpansion { trigger_len, replacement, add_space } => { // attempt 2 - deliberate backup clipboard, untested
+    //     let final_text = if add_space {
+    //         format!("{}\u{00A0}", replacement)
+    //     } else {
+    //         replacement.clone()
+    //     };
+
+    //     // Save current primary selection (best effort)
+    //     let original_primary = WaylandTextInjector::get_primary()
+    //         .unwrap_or_default();  // returns String, no Result left
+
+    //     // Delete the trigger text with backspaces
+    //     for _ in 0..trigger_len {
+    //         self.on_key_event(KeyEvent::new(Key::KEY_BACKSPACE, KeyValue::Press))?;
+    //         self.on_key_event(KeyEvent::new(Key::KEY_BACKSPACE, KeyValue::Release))?;
+    //     }
+
+    //     // Copy replacement to PRIMARY (silent on KDE Plasma)
+    //     WaylandTextInjector::copy_to_primary(&final_text)?;
+
+    //     // Paste using Shift+Insert (pastes from primary)
+    //     self.on_key_event(KeyEvent::new(Key::KEY_LEFTSHIFT, KeyValue::Press))?;
+    //     self.on_key_event(KeyEvent::new(Key::KEY_INSERT, KeyValue::Press))?;
+    //     self.on_key_event(KeyEvent::new(Key::KEY_INSERT, KeyValue::Release))?;
+    //     self.on_key_event(KeyEvent::new(Key::KEY_LEFTSHIFT, KeyValue::Release))?;
+
+    //     // Restore original primary in background
+    //     let original = original_primary.clone();
+    //     std::thread::spawn(move || {
+    //         std::thread::sleep(Duration::from_millis(100));
+    //         let _ = WaylandTextInjector::copy_to_primary(&original);
+    //     });
+    // }
+            // try 3 - auto clear at end, hopefully less flashy
+        Action::TextExpansion { trigger_len, replacement, add_space } => {
+        let final_text = if add_space {
+            format!("{}\u{00A0}", replacement)  // non-breaking space if desired
+        } else {
+            replacement.clone()
+        };
+
+        // Delete trigger
+        for _ in 0..trigger_len {
+            self.on_key_event(KeyEvent::new(Key::KEY_BACKSPACE, KeyValue::Press))?;
+            self.on_key_event(KeyEvent::new(Key::KEY_BACKSPACE, KeyValue::Release))?;
         }
 
+        // Put replacement into primary (with auto-clear after paste)
+        WaylandTextInjector::copy_to_primary(&final_text)?;
 
+        // Paste from primary
+        self.on_key_event(KeyEvent::new(Key::KEY_LEFTSHIFT, KeyValue::Press))?;
+        self.on_key_event(KeyEvent::new(Key::KEY_INSERT, KeyValue::Press))?;
+        self.on_key_event(KeyEvent::new(Key::KEY_INSERT, KeyValue::Release))?;
+        self.on_key_event(KeyEvent::new(Key::KEY_LEFTSHIFT, KeyValue::Release))?;
+
+        // Nothing else needed — regular clipboard untouched, primary auto-clears
+    }
 
         }
         Ok(())
