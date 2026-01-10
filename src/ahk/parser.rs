@@ -4,7 +4,7 @@ use regex::Regex;
 use std::path::Path;
 
 pub struct AhkParser {
-    hotif_contexts: Vec<String>,
+    // hotif_contexts: Vec<String>,
 }
 
 fn unescape_ahk_string(s: &str) -> String {
@@ -41,7 +41,7 @@ fn unescape_ahk_string(s: &str) -> String {
 impl AhkParser {
     pub fn new() -> Self {
         Self {
-            hotif_contexts: Vec::new(),
+            // hotif_contexts: Vec::new(),
         }
     }
 

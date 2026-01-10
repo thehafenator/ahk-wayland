@@ -160,76 +160,77 @@ where
 fn const_true() -> bool {
     true
 }
-fn convert_send_to_actions(send_str: &str) -> Vec<keymap_action::KeymapAction> {
-    use crate::ahk::send_parser::{parse_send_string, SendToken};
+// fn convert_send_to_actions(send_str: &str) -> Vec<keymap_action::KeymapAction> {
+//     use crate::ahk::send_parser::{parse_send_string, SendToken};
 
-    let tokens = parse_send_string(send_str);
-    let mut actions = Vec::new();
+//     let tokens = parse_send_string(send_str);
+//     let mut actions = Vec::new();
 
-    for token in tokens {
-        match token {
-            SendToken::Key { key, modifiers } => {
-                let key_press = key_press::KeyPress {
-                    key,
-                    modifiers: modifiers
-                        .into_iter()
-                        .map(|k| match k {
-                            Key::KEY_LEFTCTRL | Key::KEY_RIGHTCTRL => key_press::Modifier::Control,
-                            Key::KEY_LEFTALT | Key::KEY_RIGHTALT => key_press::Modifier::Alt,
-                            Key::KEY_LEFTSHIFT | Key::KEY_RIGHTSHIFT => key_press::Modifier::Shift,
-                            Key::KEY_LEFTMETA | Key::KEY_RIGHTMETA => key_press::Modifier::Windows,
-                            k => key_press::Modifier::Key(k),
-                        })
-                        .collect(),
-                };
-                actions.push(keymap_action::KeymapAction::KeyPressAndRelease(key_press));
-            }
-            SendToken::Text(text) => {
-    for ch in text.chars() {
-        let (key_opt, needs_shift) = if ch.is_ascii_uppercase() {
-            (char_to_evdev_key(ch.to_ascii_lowercase()), true)
-        } else {
-            (char_to_evdev_key(ch), false)
-        };
+//     for token in tokens {
+//         match token {
+//             SendToken::Key { key, modifiers } => {
+//                 let key_press = key_press::KeyPress {
+//                     key,
+//                     modifiers: modifiers
+//                         .into_iter()
+//                         .map(|k| match k {
+//                             Key::KEY_LEFTCTRL | Key::KEY_RIGHTCTRL => key_press::Modifier::Control,
+//                             Key::KEY_LEFTALT | Key::KEY_RIGHTALT => key_press::Modifier::Alt,
+//                             Key::KEY_LEFTSHIFT | Key::KEY_RIGHTSHIFT => key_press::Modifier::Shift,
+//                             Key::KEY_LEFTMETA | Key::KEY_RIGHTMETA => key_press::Modifier::Windows,
+//                             k => key_press::Modifier::Key(k),
+//                         })
+//                         .collect(),
+//                 };
+//                 actions.push(keymap_action::KeymapAction::KeyPressAndRelease(key_press));
+//             }
+//             SendToken::Text(text) => {
+//     for ch in text.chars() {
+//         let (key_opt, needs_shift) = if ch.is_ascii_uppercase() {
+//             (char_to_evdev_key(ch.to_ascii_lowercase()), true)
+//         } else {
+//             (char_to_evdev_key(ch), false)
+//         };
         
-        if let Some(key) = key_opt {
-            let modifiers = if needs_shift {
-                vec![key_press::Modifier::Shift]
-            } else {
-                vec![]
-            };
-            let key_press = key_press::KeyPress { key, modifiers };
-            actions.push(keymap_action::KeymapAction::KeyPressAndRelease(key_press));
-        }
-    }
-}
-        }
-    }
+//         if let Some(key) = key_opt {
+//             let modifiers = if needs_shift {
+//                 vec![key_press::Modifier::Shift]
+//             } else {
+//                 vec![]
+//             };
+//             let key_press = key_press::KeyPress { key, modifiers };
+//             actions.push(keymap_action::KeymapAction::KeyPressAndRelease(key_press));
+//         }
+//     }
+// }
+//         }
+//     }
 
-    actions
-}
+//     actions
+// }
 
-fn char_to_evdev_key(c: char) -> Option<Key> {
-    use crate::ahk::parser::string_to_key;
-    match c {
-        'a'..='z' => string_to_key(&c.to_string()),
-        'A'..='Z' => string_to_key(&c.to_lowercase().to_string()),
-        '0'..='9' => string_to_key(&c.to_string()),
-        ' ' => Some(Key::KEY_SPACE),
-        ';' => Some(Key::KEY_SEMICOLON),
-        ',' => Some(Key::KEY_COMMA),
-        '.' => Some(Key::KEY_DOT),
-        '/' => Some(Key::KEY_SLASH),
-        '\'' => Some(Key::KEY_APOSTROPHE),
-        '-' => Some(Key::KEY_MINUS),
-        '=' => Some(Key::KEY_EQUAL),
-        '[' => Some(Key::KEY_LEFTBRACE),
-        ']' => Some(Key::KEY_RIGHTBRACE),
-        '\\' => Some(Key::KEY_BACKSLASH),
-        '`' => Some(Key::KEY_GRAVE),
-        _ => None,
-    }
-}
+// fn char_to_evdev_key(c: char) -> Option<Key> {
+//     use crate::ahk::parser::string_to_key;
+//     match c {
+//         'a'..='z' => string_to_key(&c.to_string()),
+//         'A'..='Z' => string_to_key(&c.to_lowercase().to_string()),
+//         '0'..='9' => string_to_key(&c.to_string()),
+//         ' ' => Some(Key::KEY_SPACE),
+//         ';' => Some(Key::KEY_SEMICOLON),
+//         ',' => Some(Key::KEY_COMMA),
+//         '.' => Some(Key::KEY_DOT),
+//         '/' => Some(Key::KEY_SLASH),
+//         '\'' => Some(Key::KEY_APOSTROPHE),
+//         '-' => Some(Key::KEY_MINUS),
+//         '=' => Some(Key::KEY_EQUAL),
+//         '[' => Some(Key::KEY_LEFTBRACE),
+//         ']' => Some(Key::KEY_RIGHTBRACE),
+//         '\\' => Some(Key::KEY_BACKSLASH),
+//         '`' => Some(Key::KEY_GRAVE),
+//         _ => None,
+//     }
+// }
+
 pub fn load_configs(filenames: &[PathBuf]) -> Result<Config, Box<dyn error::Error>> {
     let config_contents = fs::read_to_string(&filenames[0])?;
 
@@ -245,7 +246,7 @@ pub fn load_configs(filenames: &[PathBuf]) -> Result<Config, Box<dyn error::Erro
             config.virtual_modifiers.push(Key::KEY_CAPSLOCK);
             
             // // Disable CapsLock toggle functionality
-            use crate::config::modmap_action::{ModmapAction, Keys};
+            // use crate::config::modmap_action::{ModmapAction, Keys};
             // config.modmap.push(Modmap {
             //     name: "Disable CapsLock toggle".to_string(),
             //     remap: {

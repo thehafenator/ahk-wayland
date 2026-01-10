@@ -1,8 +1,8 @@
 [package]
-name = "xremap"
+name = "ahk-wayland"
 version = "0.14.5"
 edition = "2021"
-description = "Dynamic key remapp for X and Wayland"
+description = "Wayland & X11 Key Remapper. Forked from Xremap to allow Autohotkey version 2 like syntax."
 license = "MIT"
 repository = "https://github.com/k0kubun/xremap"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

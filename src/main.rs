@@ -19,8 +19,8 @@ use std::io::stdout;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::PathBuf;
 use std::time::Duration;
-use xremap::{action_dispatcher, client, config, device, event, event_handler};
-use xremap::ahk::interpreter::AhkInterpreter;
+use ahk_wayland::{action_dispatcher, client, config, device, event, event_handler};
+use ahk_wayland::ahk::interpreter::AhkInterpreter;
 
 #[cfg(test)]
 mod tests;

@@ -608,7 +608,7 @@ impl EventHandler {
         Ok(())
     }
 
-    fn dispatch_action(&mut self, action: &TaggedAction, key: &Key, config: &Config) -> Result<(), Box<dyn Error>> {
+    fn dispatch_action(&mut self, action: &TaggedAction, key: &Key, _config: &Config) -> Result<(), Box<dyn Error>> {
         match &action.action {
             KeymapAction::KeyPressAndRelease(key_press) => self.send_key_press_and_release(key_press),
             KeymapAction::KeyPress(key) => self.send_key(key, PRESS),
