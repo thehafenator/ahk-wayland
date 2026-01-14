@@ -8,6 +8,8 @@ mod modmap;
 pub mod modmap_action;
 pub mod remap;
 
+
+
 #[cfg(test)]
 mod tests;
 
@@ -30,7 +32,9 @@ use std::{
     time::SystemTime,
 };
 
+
 use self::{
+    // key::Key,
     keymap::{build_keymap_table, KeymapEntry},
 };
 use crate::ahk::{parse_ahk_file, AhkAction};
@@ -156,6 +160,76 @@ where
 fn const_true() -> bool {
     true
 }
+// fn convert_send_to_actions(send_str: &str) -> Vec<keymap_action::KeymapAction> {
+//     use crate::ahk::send_parser::{parse_send_string, SendToken};
+
+//     let tokens = parse_send_string(send_str);
+//     let mut actions = Vec::new();
+
+//     for token in tokens {
+//         match token {
+//             SendToken::Key { key, modifiers } => {
+//                 let key_press = key_press::KeyPress {
+//                     key,
+//                     modifiers: modifiers
+//                         .into_iter()
+//                         .map(|k| match k {
+//                             Key::KEY_LEFTCTRL | Key::KEY_RIGHTCTRL => key_press::Modifier::Control,
+//                             Key::KEY_LEFTALT | Key::KEY_RIGHTALT => key_press::Modifier::Alt,
+//                             Key::KEY_LEFTSHIFT | Key::KEY_RIGHTSHIFT => key_press::Modifier::Shift,
+//                             Key::KEY_LEFTMETA | Key::KEY_RIGHTMETA => key_press::Modifier::Windows,
+//                             k => key_press::Modifier::Key(k),
+//                         })
+//                         .collect(),
+//                 };
+//                 actions.push(keymap_action::KeymapAction::KeyPressAndRelease(key_press));
+//             }
+//             SendToken::Text(text) => {
+//     for ch in text.chars() {
+//         let (key_opt, needs_shift) = if ch.is_ascii_uppercase() {
+//             (char_to_evdev_key(ch.to_ascii_lowercase()), true)
+//         } else {
+//             (char_to_evdev_key(ch), false)
+//         };
+        
+//         if let Some(key) = key_opt {
+//             let modifiers = if needs_shift {
+//                 vec![key_press::Modifier::Shift]
+//             } else {
+//                 vec![]
+//             };
+//             let key_press = key_press::KeyPress { key, modifiers };
+//             actions.push(keymap_action::KeymapAction::KeyPressAndRelease(key_press));
+//         }
+//     }
+// }
+//         }
+//     }
+
+//     actions
+// }
+
+// fn char_to_evdev_key(c: char) -> Option<Key> {
+//     use crate::ahk::parser::string_to_key;
+//     match c {
+//         'a'..='z' => string_to_key(&c.to_string()),
+//         'A'..='Z' => string_to_key(&c.to_lowercase().to_string()),
+//         '0'..='9' => string_to_key(&c.to_string()),
+//         ' ' => Some(Key::KEY_SPACE),
+//         ';' => Some(Key::KEY_SEMICOLON),
+//         ',' => Some(Key::KEY_COMMA),
+//         '.' => Some(Key::KEY_DOT),
+//         '/' => Some(Key::KEY_SLASH),
+//         '\'' => Some(Key::KEY_APOSTROPHE),
+//         '-' => Some(Key::KEY_MINUS),
+//         '=' => Some(Key::KEY_EQUAL),
+//         '[' => Some(Key::KEY_LEFTBRACE),
+//         ']' => Some(Key::KEY_RIGHTBRACE),
+//         '\\' => Some(Key::KEY_BACKSLASH),
+//         '`' => Some(Key::KEY_GRAVE),
+//         _ => None,
+//     }
+// }
 
 pub fn load_configs(filenames: &[PathBuf]) -> Result<Config, Box<dyn error::Error>> {
     let config_contents = fs::read_to_string(&filenames[0])?;
@@ -168,21 +242,42 @@ pub fn load_configs(filenames: &[PathBuf]) -> Result<Config, Box<dyn error::Erro
             let mut config = Config::new();
             let hotkey_count = ahk_config.hotkeys.len();
 
+            // Add CapsLock as virtual modifier for AHK configs
             config.virtual_modifiers.push(Key::KEY_CAPSLOCK);
+            
+            // // Disable CapsLock toggle functionality
+            // use crate::config::modmap_action::{ModmapAction, Keys};
+            // config.modmap.push(Modmap {
+            //     name: "Disable CapsLock toggle".to_string(),
+            //     remap: {
+            //         let mut map = HashMap::new();
+            //         map.insert(Key::KEY_CAPSLOCK, ModmapAction::Keys(Keys::Key(Key::KEY_CAPSLOCK)));
+            //         map
+            //     },
+            //     application: None,
+            //     window: None,
+            //     device: None,
+            //     mode: None,
+            // });
+
+
+
+
+
 
             let mut context_hotkeys = Vec::new();
             let mut global_hotkeys = Vec::new();
 
             for hotkey in ahk_config.hotkeys {
-                let keymap = convert_ahk_hotkey_to_keymap(hotkey);
-                if keymap.window.is_some() || keymap.application.is_some() {
-                    context_hotkeys.push(keymap);
-                } else {
-                    global_hotkeys.push(keymap);
-                }
-            }
-            config.keymap.extend(context_hotkeys);
-            config.keymap.extend(global_hotkeys);
+    let keymap = convert_ahk_hotkey_to_keymap(hotkey);
+    if keymap.window.is_some() || keymap.application.is_some() {
+        context_hotkeys.push(keymap);
+    } else {
+        global_hotkeys.push(keymap);
+    }
+}
+config.keymap.extend(context_hotkeys);
+config.keymap.extend(global_hotkeys);
 
             config.hotstrings = extracted_hotstrings;
             if !config.hotstrings.is_empty() {
@@ -197,51 +292,53 @@ pub fn load_configs(filenames: &[PathBuf]) -> Result<Config, Box<dyn error::Erro
         ConfigFiletype::Toml => toml::from_str(&config_contents)?,
     };
 
-    for filename in &filenames[1..] {
-        let config_contents = fs::read_to_string(filename)?;
-        let c: Config = match get_file_ext(filename) {
-            ConfigFiletype::Ahk => {
-                let ahk_config = parse_ahk_file(filename).map_err(|e| format!("AHK parse error: {}", e))?;
-                let extracted_hotstrings = crate::ahk::transpiler::extract_hotstrings(&ahk_config);
+for filename in &filenames[1..] {
+    let config_contents = fs::read_to_string(filename)?;
+    let c: Config = match get_file_ext(filename) {
+        ConfigFiletype::Ahk => {
+            let ahk_config = parse_ahk_file(filename).map_err(|e| format!("AHK parse error: {}", e))?;
+            let extracted_hotstrings = crate::ahk::transpiler::extract_hotstrings(&ahk_config);
 
-                let mut cfg = Config::new();
-                cfg.virtual_modifiers.push(Key::KEY_CAPSLOCK);
+            let mut cfg = Config::new();
+            cfg.virtual_modifiers.push(Key::KEY_CAPSLOCK);
 
-                let hotkey_count = ahk_config.hotkeys.len();
+            let hotkey_count = ahk_config.hotkeys.len();
+            println!("DEBUG: Parsed {} hotkeys from additional AHK file", hotkey_count);
 
-                let mut context_hotkeys = Vec::new();
-                let mut global_hotkeys = Vec::new();
+            // ADD THIS:
+            let mut context_hotkeys = Vec::new();
+            let mut global_hotkeys = Vec::new();
 
-                for hotkey in ahk_config.hotkeys {
-                    let keymap = convert_ahk_hotkey_to_keymap(hotkey);
-                    if keymap.window.is_some() || keymap.application.is_some() {
-                        context_hotkeys.push(keymap);
-                    } else {
-                        global_hotkeys.push(keymap);
-                    }
+            for hotkey in ahk_config.hotkeys {
+                let keymap = convert_ahk_hotkey_to_keymap(hotkey);
+                if keymap.window.is_some() || keymap.application.is_some() {
+                    context_hotkeys.push(keymap);
+                } else {
+                    global_hotkeys.push(keymap);
                 }
-                cfg.keymap.extend(context_hotkeys);
-                cfg.keymap.extend(global_hotkeys);
-
-                cfg.hotstrings = extracted_hotstrings;
-                if !cfg.hotstrings.is_empty() {
-                    cfg.hotstring_matcher = Some(HotstringMatcher::new(cfg.hotstrings.clone()));
-                }
-
-                println!("Loaded {} AHK hotkeys (additional file)", hotkey_count);
-                println!("Loaded {} AHK hotstrings (additional file)", cfg.hotstrings.len());
-
-                cfg
             }
-            ConfigFiletype::Yaml => serde_yaml::from_str(&config_contents)?,
-            ConfigFiletype::Toml => toml::from_str(&config_contents)?,
-        };
+            cfg.keymap.extend(context_hotkeys);
+            cfg.keymap.extend(global_hotkeys);
 
-        config.modmap.extend(c.modmap);
-        config.keymap.extend(c.keymap);
-        config.virtual_modifiers.extend(c.virtual_modifiers);
-        config.hotstrings.extend(c.hotstrings);
-    }
+            cfg.hotstrings = extracted_hotstrings;
+            if !cfg.hotstrings.is_empty() {
+                cfg.hotstring_matcher = Some(HotstringMatcher::new(cfg.hotstrings.clone()));
+            }
+
+            println!("Loaded {} AHK hotkeys (additional file)", hotkey_count);
+            println!("Loaded {} AHK hotstrings (additional file)", cfg.hotstrings.len());
+
+            cfg
+        }
+        ConfigFiletype::Yaml => serde_yaml::from_str(&config_contents)?,
+        ConfigFiletype::Toml => toml::from_str(&config_contents)?,
+    };
+
+    config.modmap.extend(c.modmap);
+    config.keymap.extend(c.keymap);
+    config.virtual_modifiers.extend(c.virtual_modifiers);
+    config.hotstrings.extend(c.hotstrings);
+}
 
     config.modify_time = filenames.last().and_then(|path| path.metadata().ok()?.modified().ok());
     config.keymap_table = build_keymap_table(&config.keymap);
@@ -249,26 +346,33 @@ pub fn load_configs(filenames: &[PathBuf]) -> Result<Config, Box<dyn error::Erro
     Ok(config)
 }
 
+// Update the convert_actions function to detect when to use the interpreter
 fn convert_actions(action: AhkAction) -> Vec<KeymapAction> {
+    // Check if this action or any nested actions contain Send() or other
+    // actions that need the dispatcher
     if needs_interpreter(&action) {
         eprintln!("DEBUG: Using interpreter for action: {:?}", action);
         vec![KeymapAction::AhkInterpreted(action)]
     } else {
+        // Use shell script approach for simple actions
         eprintln!("DEBUG: Using shell script for action");
         convert_actions_to_shell(action)
     }
 }
 
+
+// Check if an action needs the interpreter (contains Send, or nested IfWinActive with Send, etc.)
 fn needs_interpreter(action: &AhkAction) -> bool {
     match action {
         AhkAction::Send(_) => true,
-        AhkAction::Remap(_) => true,
-        AhkAction::WinWaitActive { .. } => true,
+        AhkAction::Remap(_) => true, // Direct key remap needs dispatcher
+        AhkAction::WinWaitActive { .. } => true, // Needs interpreter for blocking wait
         AhkAction::Block(actions) => actions.iter().any(needs_interpreter),
         AhkAction::IfWinActive { then_actions, else_actions, .. } => {
             then_actions.iter().any(needs_interpreter) 
                 || else_actions.as_ref().map_or(false, |actions| actions.iter().any(needs_interpreter))
         }
+        // These can be handled via shell
         AhkAction::Run(_) 
         | AhkAction::Shell(_) 
         | AhkAction::Sleep(_) 
@@ -277,6 +381,8 @@ fn needs_interpreter(action: &AhkAction) -> bool {
     }
 }
 
+
+// Rename the old convert_actions to convert_actions_to_shell
 fn convert_actions_to_shell(action: AhkAction) -> Vec<KeymapAction> {
     match action {
         AhkAction::Run(parts) => {
@@ -291,7 +397,8 @@ fn convert_actions_to_shell(action: AhkAction) -> Vec<KeymapAction> {
             }
             vec![KeymapAction::Launch(cmd)]
         }
-        AhkAction::Send(_keys) => {
+AhkAction::Send(_keys) => {
+                // This shouldn't be reached if needs_interpreter works correctly
             eprintln!("WARNING: Send() in shell context - this won't work!");
             vec![]
         }
@@ -319,14 +426,18 @@ fn convert_actions_to_shell(action: AhkAction) -> Vec<KeymapAction> {
         AhkAction::WinActivate(criteria) => {
             vec![KeymapAction::Launch(build_kdotool_command("windowactivate", &criteria))]
         }
+
         AhkAction::WinWaitActive { .. } => {
+            // Should never reach here - needs_interpreter returns true for this
             eprintln!("WARNING: WinWaitActive in shell context - should use interpreter!");
             vec![]
         }
+
         AhkAction::WinClose(criteria) => {
             vec![KeymapAction::Launch(build_kdotool_command("windowclose", &criteria))]
         }
         AhkAction::IfWinActive { criteria, then_actions, else_actions } => {
+            // Only simple IfWinActive without Send() should reach here
             let condition_check = build_kdotool_shell(&criteria, "getactivewindow");
             let then_script = actions_to_shell_script(&then_actions);
             
@@ -348,6 +459,7 @@ fn convert_actions_to_shell(action: AhkAction) -> Vec<KeymapAction> {
     }
 }
 
+// Helper function to convert a list of AhkActions to shell script
 fn actions_to_shell_script(actions: &[AhkAction]) -> String {
     let mut script = String::new();
     
@@ -375,6 +487,8 @@ fn actions_to_shell_script(actions: &[AhkAction]) -> String {
                 script.push_str(&format!("  {}\n", cmd.join(" ")));
             }
             AhkAction::Send(_) => {
+                // Send commands can't easily be converted to shell
+                // We'd need to emit key events, which requires the dispatcher
                 script.push_str("  # Send command not supported in shell context\n");
             }
             AhkAction::Block(nested_actions) => {
@@ -389,7 +503,6 @@ fn actions_to_shell_script(actions: &[AhkAction]) -> String {
     script
 }
 
-#[cfg(feature = "kde")]
 fn build_kdotool_command(action: &str, criteria: &WindowCriteria) -> Vec<String> {
     let mut cmd = vec!["kdotool".to_string(), "search".to_string()];
     
@@ -412,12 +525,6 @@ fn build_kdotool_command(action: &str, criteria: &WindowCriteria) -> Vec<String>
     cmd
 }
 
-#[cfg(not(feature = "kde"))]
-fn build_kdotool_command(_action: &str, _criteria: &WindowCriteria) -> Vec<String> {
-    vec![]
-}
-
-#[cfg(feature = "kde")]
 fn build_kdotool_shell(criteria: &WindowCriteria, action: &str) -> String {
     if action == "getactivewindow" {
         match criteria {
@@ -441,6 +548,7 @@ fn build_kdotool_shell(criteria: &WindowCriteria, action: &str) -> String {
             }
         }
     } else {
+        // For other actions (windowactivate), use search
         let search_arg = match criteria {
             WindowCriteria::Title(title) => format!("--name '{}'", title.replace("'", "'\\''")),
             WindowCriteria::Class(class) => format!("--class '{}'", class.replace("'", "'\\''")),
@@ -451,11 +559,8 @@ fn build_kdotool_shell(criteria: &WindowCriteria, action: &str) -> String {
     }
 }
 
-#[cfg(not(feature = "kde"))]
-fn build_kdotool_shell(_criteria: &WindowCriteria, _action: &str) -> String {
-    String::from("false")
-}
 
+// Update convert_ahk_hotkey_to_keymap to use the helper:
 fn convert_ahk_hotkey_to_keymap(hotkey: crate::ahk::AhkHotkey) -> Keymap {
     let mut keymap = Keymap {
         name: String::new(),
@@ -487,22 +592,24 @@ fn convert_ahk_hotkey_to_keymap(hotkey: crate::ahk::AhkHotkey) -> Keymap {
     let modifiers: Vec<key_press::Modifier> = hotkey
         .modifiers
         .iter()
-        .map(|k| match *k {
-            Key::KEY_LEFTCTRL | Key::KEY_RIGHTCTRL => key_press::Modifier::Control,
-            Key::KEY_LEFTALT | Key::KEY_RIGHTALT => key_press::Modifier::Alt,
-            Key::KEY_LEFTSHIFT | Key::KEY_RIGHTSHIFT => key_press::Modifier::Shift,
-            Key::KEY_LEFTMETA | Key::KEY_RIGHTMETA => key_press::Modifier::Windows,
-            k => key_press::Modifier::Key(k),
+        .map(|k| match k {
+            &Key::KEY_LEFTCTRL | &Key::KEY_RIGHTCTRL => key_press::Modifier::Control,
+            &Key::KEY_LEFTALT | &Key::KEY_RIGHTALT => key_press::Modifier::Alt,
+            &Key::KEY_LEFTSHIFT | &Key::KEY_RIGHTSHIFT => key_press::Modifier::Shift,
+            &Key::KEY_LEFTMETA | &Key::KEY_RIGHTMETA => key_press::Modifier::Windows,
+            k => key_press::Modifier::Key(k.clone()),
         })
         .collect();
 
     let key_press = key_press::KeyPress {
         key: hotkey.key,
-        modifiers: modifiers.clone(),
+        modifiers,
     };
 
     let actions = convert_actions(hotkey.action);
-
     keymap.remap.insert(key_press, actions);
     keymap
+    // println!("DEBUG: Hotkey modifiers: {:?}, key: {:?}, context: {:?}", 
+    //      hotkey.modifiers, hotkey.key, hotkey.context);
 }
+

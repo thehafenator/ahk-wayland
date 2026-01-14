@@ -1,0 +1,299 @@
+Project Overview: ahk-wayland
+What This Project Does
+A Rust-based keyboard remapping daemon that brings AutoHotkey v2 syntax to Linux/Wayland. It intercepts keyboard input at the kernel level (via evdev) and can remap keys, execute commands, detect window contexts, and expand hotstrings.
+Current State vs Goal
+✅ What Works Now
+
+Basic AHK syntax: ^a::Send("text")
+Window detection: #HotIf WinActive("Firefox")
+Conditional logic: If WinActive() { } else { }
+Virtual modifiers (CapsLock as modifier)
+Hotstring expansion
+Send() for text/keypresses
+Direct key remaps
+
+🎯 What We Want to Add
+AHK v2 Key Up/Down Detection:
+ahk; Detect when key is pressed vs released
+F13::Send("pressed")
+F13 Up::Send("released")
+
+; Send explicit key states
+^a::Send("{Shift down}hello{Shift up} world")  ; Output: "HELLO world"
+```
+
+---
+
+## Directory Structure
+```
+ahk-wayland/src/
+├── ahk/                     # AHK parsing & interpretation
+│   ├── parser.rs           # Parses .ahk files → AhkConfig
+│   ├── send_parser.rs      # Parses Send("...") strings → SendTokens
+│   ├── interpreter.rs      # Executes AhkActions at runtime
+│   ├── types.rs            # AhkAction, AhkHotkey, WindowCriteria enums
+│   ├── transpiler.rs       # Extracts hotstrings from AHK
+│   └── mod.rs              # Module exports
+│
+├── config/                  # Configuration loading & types
+│   ├── mod.rs              # Loads .ahk/.yaml/.toml configs
+│   ├── keymap.rs           # High-level key combo remaps (Ctrl+C → Ctrl+V)
+│   ├── keymap_action.rs    # Actions that keymaps can trigger
+│   ├── modmap.rs           # Low-level key transformations
+│   ├── modmap_action.rs    # Multi-purpose keys (held/alone behavior)
+│   ├── key_press.rs        # KeyPress struct (key + modifiers)
+│   └── key.rs              # Parse key names → evdev KeyCodes
+│
+├── event_handler.rs         # Core event loop - processes key events
+├── action_dispatcher.rs     # Sends actions to virtual keyboard
+├── action.rs               # Action enum (KeyEvent, Command, Delay, etc)
+├── event.rs                # Event enum (KeyEvent with Press/Release/Repeat)
+├── device.rs               # Manages input/output devices via evdev
+├── client/                  # Window manager detection (KDE/Hyprland/etc)
+├── hotstring.rs            # Hotstring matching engine
+└── main.rs                 # Entry point, event loop
+
+Key File Responsibilities
+Core Flow: Input → Parser → Handler → Interpreter → Dispatcher → Output
+1. event.rs - Event Types
+rustpub enum KeyValue {
+    Press,    // Key pressed down
+    Release,  // Key released
+    Repeat,   // Key held (auto-repeat)
+}
+
+Already has up/down detection! (KeyValue::Press vs KeyValue::Release)
+We just need to expose this to AHK syntax
+
+2. ahk/parser.rs - Parse .ahk Files
+
+Converts ^a::Send("hello") → AhkHotkey struct
+Currently only parses base hotkey (no Up suffix support)
+Needs modification to parse F13 Up:: syntax
+
+3. ahk/types.rs - Data Structures
+rustpub struct AhkHotkey {
+    pub modifiers: Vec<KeyCode>,
+    pub key: KeyCode,
+    pub action: AhkAction,      // What to do when triggered
+    pub context: Option<String>, // Window context
+    pub is_wildcard: bool,
+}
+
+Needs addition: trigger_on: TriggerMode enum (Press/Release/Both)
+
+4. ahk/send_parser.rs - Parse Send() Strings
+rustpub enum SendToken {
+    Key { key: KeyCode, modifiers: Vec<KeyCode> },
+    Text(String),
+}
+
+Currently only sends press+release pairs
+Needs addition: KeyDown(KeyCode) and KeyUp(KeyCode) variants
+
+5. ahk/interpreter.rs - Execute Actions at Runtime
+
+Takes AhkAction → generates Vec<Action> (key events)
+Handles Send(), IfWinActive, WinActivate, etc.
+Needs modification: Convert SendToken::KeyDown/Up to Action::KeyEvent
+
+6. event_handler.rs - Main Event Loop
+
+Receives physical key events from devices
+Checks modmap → keymap → dispatches actions
+Current behavior: Only triggers on Press (line 414-416)
+Needs modification: Optionally trigger on Release for "Up" hotkeys
+
+7. action_dispatcher.rs - Send to Virtual Keyboard
+
+Takes Action::KeyEvent → writes to virtual device
+Already handles individual Press/Release events
+No changes needed - already supports arbitrary key states
+
+8. config/modmap_action.rs - Multi-Purpose Keys
+rustpub struct PressReleaseKey {
+    pub press: Vec<KeymapAction>,
+    pub repeat: Vec<KeymapAction>,
+    pub release: Vec<KeymapAction>,
+}
+
+This already exists! YAML modmap supports separate press/release actions
+We need to expose this same capability to AHK syntax
+
+
+Implementation Plan
+Phase 1: Detect Key Up in AHK Hotkeys
+Goal: Support F13 Up::Send("released")
+Files to modify:
+
+ahk/types.rs: Add trigger mode
+
+rust   pub enum TriggerMode {
+       Press,    // Default - trigger on key down
+       Release,  // Trigger on key up (suffix: "Up")
+       Both,     // Future: trigger on both
+   }
+   
+   pub struct AhkHotkey {
+       // ... existing fields ...
+       pub trigger_on: TriggerMode,
+   }
+
+ahk/parser.rs: Parse "Up" suffix
+
+rust   fn parse_hotkey(&self, line: &str, context: Option<String>) -> Result<Option<AhkHotkey>, String> {
+       let parts: Vec<&str> = line.splitn(2, "::").collect();
+       let hotkey_def = parts[0].trim();
+       
+       // Check for " Up" suffix
+       let (trigger_on, key_def) = if hotkey_def.ends_with(" Up") {
+           (TriggerMode::Release, hotkey_def.trim_end_matches(" Up").trim())
+       } else {
+           (TriggerMode::Press, hotkey_def)
+       };
+       
+       let (modifiers, key, is_wildcard) = self.parse_key_combo(key_def)?;
+       // ... rest of parsing ...
+       
+       Ok(Some(AhkHotkey {
+           modifiers,
+           key,
+           action,
+           context,
+           is_wildcard,
+           trigger_on,  // NEW
+       }))
+   }
+
+event_handler.rs: Trigger on release when needed
+
+rust   fn on_key_event(&mut self, event: &KeyEvent, ...) -> Result<bool, Box<dyn Error>> {
+       let key = Key::new(event.code());
+       let value = event.value();
+       
+       // ... existing modmap logic ...
+       
+       // Check if we should trigger this hotkey
+       if let Some(actions) = self.find_keymap(config, &key, device)? {
+           // Check if this keymap wants Press or Release trigger
+           let should_trigger = match actions.trigger_mode {
+               TriggerMode::Press => is_pressed(value),  // existing behavior
+               TriggerMode::Release => value == RELEASE,  // NEW
+               TriggerMode::Both => is_pressed(value) || value == RELEASE,
+           };
+           
+           if should_trigger {
+               self.dispatch_actions(&actions, &key, config)?;
+               continue;
+           }
+       }
+       // ...
+   }
+
+config/keymap.rs: Store trigger mode in KeymapEntry
+
+rust   pub struct KeymapEntry {
+       pub actions: Vec<KeymapAction>,
+       pub modifiers: Vec<Modifier>,
+       pub trigger_mode: TriggerMode,  // NEW
+       // ... rest ...
+   }
+
+Phase 2: Send Explicit Up/Down in Send()
+Goal: Support Send("{Shift down}hello{Shift up}")
+Files to modify:
+
+ahk/send_parser.rs: Parse {Key down} and {Key up}
+
+rust   #[derive(Debug, Clone)]
+   pub enum SendToken {
+       Key { key: KeyCode, modifiers: Vec<KeyCode> },
+       KeyDown(KeyCode),  // NEW: explicit down
+       KeyUp(KeyCode),    // NEW: explicit up
+       Text(String),
+   }
+   
+   fn parse_special_key(name: &str) -> Option<(KeyCode, Option<KeyState>)> {
+       let parts: Vec<&str> = name.split_whitespace().collect();
+       let (key_name, state) = match parts.as_slice() {
+           [key] => (key, None),
+           [key, "down"] => (key, Some(KeyState::Down)),
+           [key, "up"] => (key, Some(KeyState::Up)),
+           _ => return None,
+       };
+       
+       match_key(key_name).map(|k| (k, state))
+   }
+
+ahk/interpreter.rs: Convert to key events
+
+rust   fn convert_send_to_actions(&self, send_str: &str) -> Vec<Action> {
+       let tokens = parse_send_string(send_str);
+       let mut actions = Vec::new();
+       
+       for token in tokens {
+           match token {
+               SendToken::KeyDown(key) => {
+                   actions.push(Action::KeyEvent(KeyEvent::new(key, KeyValue::Press)));
+               }
+               SendToken::KeyUp(key) => {
+                   actions.push(Action::KeyEvent(KeyEvent::new(key, KeyValue::Release)));
+               }
+               SendToken::Key { key, modifiers } => {
+                   // Existing press+release logic
+               }
+               // ...
+           }
+       }
+       actions
+   }
+
+For Future AI: Implementation Request
+Task: Add AutoHotkey v2 key up/down detection to ahk-wayland
+Background: The project already has the infrastructure:
+
+KeyValue::Press/Release/Repeat exists in event.rs
+PressReleaseKey in modmap already does press/release distinction
+Event handler receives all key states
+
+What to implement:
+
+Parse "Up" suffix in hotkeys (F13 Up::)
+
+Add TriggerMode enum to ahk/types.rs
+Modify ahk/parser.rs to detect " Up" suffix
+Store in AhkHotkey.trigger_on
+
+
+Trigger on correct key state
+
+Modify event_handler.rs to check trigger_mode
+Currently only triggers on Press - add Release support
+Thread through KeymapEntry in config/keymap.rs
+
+
+Parse {Key down} / {Key up} in Send()
+
+Add KeyDown(KeyCode) and KeyUp(KeyCode) to SendToken enum
+Modify ahk/send_parser.rs to parse "down"/"up" suffixes
+Update ahk/interpreter.rs to emit single Press/Release events
+
+
+
+Test cases:
+ahk; Should print "pressed" on down, "released" on up
+F13::Send("pressed")
+F13 Up::Send("released")
+
+; Should output "HELLO world" (shift only for first word)
+^a::Send("{Shift down}hello{Shift up} world")
+Files to modify (in order):
+
+ahk/types.rs - Add TriggerMode enum
+ahk/parser.rs - Parse Up suffix
+ahk/send_parser.rs - Parse {key down/up}
+ahk/interpreter.rs - Generate single key events
+config/keymap.rs - Add trigger_mode to KeymapEntry
+event_handler.rs - Trigger on Release when needed
+
+All infrastructure exists - just needs wiring!

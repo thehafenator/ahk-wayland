@@ -4,7 +4,7 @@ use regex::Regex;
 use std::path::Path;
 
 pub struct AhkParser {
-    hotif_contexts: Vec<String>,
+    // hotif_contexts: Vec<String>,
 }
 
 fn unescape_ahk_string(s: &str) -> String {
@@ -41,22 +41,83 @@ fn unescape_ahk_string(s: &str) -> String {
 impl AhkParser {
     pub fn new() -> Self {
         Self {
-            hotif_contexts: Vec::new(),
+            // hotif_contexts: Vec::new(),
         }
     }
 
-    fn parse_window_criteria(&self, content: &str) -> Result<WindowCriteria, String> {
-        let content = content.trim().trim_matches(|c| c == '"' || c == '\'');
+    // fn parse_window_criteria(&self, content: &str) -> Result<WindowCriteria, String> { // original before attempt at on.website
+    //     let content = content.trim().trim_matches(|c| c == '"' || c == '\'');
         
-        if let Some(exe) = content.strip_prefix("ahk_exe ") {
-            Ok(WindowCriteria::Exe(exe.trim().to_string()))
-        } else if let Some(class) = content.strip_prefix("ahk_class ") {
-            Ok(WindowCriteria::Class(class.trim().to_string()))
+    //     if let Some(exe) = content.strip_prefix("ahk_exe ") {
+    //         Ok(WindowCriteria::Exe(exe.trim().to_string()))
+    //     } else if let Some(class) = content.strip_prefix("ahk_class ") {
+    //         Ok(WindowCriteria::Class(class.trim().to_string()))
+    //     } else {
+    //         // Default to title match if no prefix
+    //         Ok(WindowCriteria::Title(content.to_string()))
+    //     }
+    // }
+
+        fn parse_window_criteria(&self, s: &str) -> Result<WindowCriteria, String> {
+        let s = s.trim();
+        if s.starts_with("WinActive(") && s.ends_with(")") {
+            let inner = &s[10..s.len()-1].trim_matches('"');
+            if let Some(exe) = inner.strip_prefix("ahk_exe ") {
+                Ok(WindowCriteria::Exe(exe.trim().to_string()))
+            } else if let Some(class) = inner.strip_prefix("ahk_class ") {
+                Ok(WindowCriteria::Class(class.trim().to_string()))
+            } else {
+                Ok(WindowCriteria::Title(inner.to_string()))
+            }
+        } else if s.starts_with("!WinActive(") && s.ends_with(")") {
+            let inner = &s[11..s.len()-1].trim_matches('"');
+            // For negated, we can wrap in negated IfWinActive later if needed
+            if let Some(exe) = inner.strip_prefix("ahk_exe ") {
+                Ok(WindowCriteria::Exe(exe.trim().to_string())) // Handle negation in interpreter
+            } else if let Some(class) = inner.strip_prefix("ahk_class ") {
+                Ok(WindowCriteria::Class(class.trim().to_string()))
+            } else {
+                Ok(WindowCriteria::Title(inner.to_string()))
+            }
         } else {
-            // Default to title match if no prefix
-            Ok(WindowCriteria::Title(content.to_string()))
+            Err(format!("Invalid hotkey context: {}", s))
         }
     }
+
+    // fn parse_window_criteria(&self, s: &str) -> Result<WindowCriteria, String> { // attempt at onwebsite
+    // let s = s.trim();
+
+    // // Determine if negated and get start position of inner content
+    // let (is_negated, inner_start) = if s.starts_with("!WinActive(") && s.ends_with(")") {
+    //     (true, 11usize)
+    // } else if s.starts_with("WinActive(") && s.ends_with(")") {
+    //     (false, 10usize)
+    // } else {
+    //     return Err(format!(
+    //         "Invalid hotkey context (must be WinActive(...) or !WinActive(...)): {}",
+    //         s
+    //     ));
+    // };
+
+    // // Extract content between parentheses and remove surrounding quotes if present
+    // let inner = &s[inner_start..s.len() - 1].trim_matches('"').trim();
+
+    // // Now parse the inner content
+    // if let Some(exe) = inner.strip_prefix("ahk_exe ") {
+    //     Ok(WindowCriteria::Exe(exe.trim().to_string()))
+    // } else if let Some(class) = inner.strip_prefix("ahk_class ") {
+    //     Ok(WindowCriteria::Class(class.trim().to_string()))
+    // } else if let Some(url_part) = inner.strip_prefix("On.website ") {
+    //     Ok(WindowCriteria::Url {
+    //         pattern: url_part.trim().to_string(),
+    //         negated: is_negated,
+    //     })
+//     } else {
+//         // Default: plain title match
+//         // (negation not stored here – you can extend Title variant later if needed)
+//         Ok(WindowCriteria::Title(inner.to_string()))
+//     }
+// }
 
     pub fn parse_file(&mut self, content: &str) -> Result<AhkConfig, String> {
         let mut hotkeys = Vec::new();
@@ -298,7 +359,34 @@ fn parse_block_actions<'a>(
         }
     }
 
-    fn parse_hotkey(&self, line: &str, context: Option<String>) -> Result<Option<AhkHotkey>, String> {
+    // fn parse_hotkey(&self, line: &str, context: Option<String>) -> Result<Option<AhkHotkey>, String> {
+    //     let parts: Vec<&str> = line.splitn(2, "::").collect();
+    //     if parts.len() != 2 {
+    //         return Ok(None);
+    //     }
+
+    //     let hotkey_def = parts[0].trim();
+    //     let action_str = parts[1].trim();
+
+    //     let action_str = if let Some(comment_pos) = action_str.find(" ;") {
+    //         &action_str[..comment_pos]
+    //     } else {
+    //         action_str
+    //     };
+
+    //     let (modifiers, key, is_wildcard) = self.parse_key_combo(hotkey_def)?;
+    //     let action = self.parse_action(action_str)?;
+
+    //     Ok(Some(AhkHotkey {
+    //         modifiers,
+    //         key,
+    //         action,
+    //         context,
+    //         is_wildcard,
+    //     }))
+    // }
+
+        fn parse_hotkey(&self, line: &str, context: Option<String>) -> Result<Option<AhkHotkey>, String> {
         let parts: Vec<&str> = line.splitn(2, "::").collect();
         if parts.len() != 2 {
             return Ok(None);
@@ -316,14 +404,161 @@ fn parse_block_actions<'a>(
         let (modifiers, key, is_wildcard) = self.parse_key_combo(hotkey_def)?;
         let action = self.parse_action(action_str)?;
 
-        Ok(Some(AhkHotkey {
-            modifiers,
-            key,
-            action,
-            context,
-            is_wildcard,
-        }))
+    //     let final_action = if let Some(ref ctx) = context { // good 1.12.2026
+    //         let criteria = self.parse_window_criteria(ctx)?;
+    //         AhkAction::IfWinActive {
+    //             criteria,
+    //             then_actions: vec![action],
+    //             else_actions: None,
+    //         }
+    //     } else {
+    //         action
+    //     };
+
+    //     Ok(Some(AhkHotkey {
+    //         modifiers,
+    //         key,
+    //         action: final_action,
+    //         context: None,
+    //         is_wildcard,
+    //     }))
+    let final_action = if let Some(ref ctx) = context {
+    let criteria = self.parse_window_criteria(ctx)?;
+
+    // Build AHK-style Send string that reproduces the original physical hotkey
+    let mut send_str = String::new();
+
+    // Modifiers first (in AHK order: ^ ! + #)
+    for &mod_key in &modifiers {
+        match mod_key {
+            KeyCode::KEY_LEFTCTRL | KeyCode::KEY_RIGHTCTRL   => send_str.push('^'),
+            KeyCode::KEY_LEFTALT  | KeyCode::KEY_RIGHTALT    => send_str.push('!'),
+            KeyCode::KEY_LEFTSHIFT| KeyCode::KEY_RIGHTSHIFT  => send_str.push('+'),
+            KeyCode::KEY_LEFTMETA | KeyCode::KEY_RIGHTMETA   => send_str.push('#'),
+            _ => {}
+        }
     }
+
+    // Main key - use {Name} format for special keys
+    let key_name = match key {
+        KeyCode::KEY_A => "a".to_string(),
+        KeyCode::KEY_B => "b".to_string(),
+        KeyCode::KEY_C => "c".to_string(),
+        KeyCode::KEY_D => "d".to_string(),
+        KeyCode::KEY_E => "e".to_string(),
+        KeyCode::KEY_F => "f".to_string(),
+        KeyCode::KEY_G => "g".to_string(),
+        KeyCode::KEY_H => "h".to_string(),
+        KeyCode::KEY_I => "i".to_string(),
+        KeyCode::KEY_J => "j".to_string(),
+        KeyCode::KEY_K => "k".to_string(),
+        KeyCode::KEY_L => "l".to_string(),
+        KeyCode::KEY_M => "m".to_string(),
+        KeyCode::KEY_N => "n".to_string(),
+        KeyCode::KEY_O => "o".to_string(),
+        KeyCode::KEY_P => "p".to_string(),
+        KeyCode::KEY_Q => "q".to_string(),
+        KeyCode::KEY_R => "r".to_string(),
+        KeyCode::KEY_S => "s".to_string(),
+        KeyCode::KEY_T => "t".to_string(),
+        KeyCode::KEY_U => "u".to_string(),
+        KeyCode::KEY_V => "v".to_string(),
+        KeyCode::KEY_W => "w".to_string(),
+        KeyCode::KEY_X => "x".to_string(),
+        KeyCode::KEY_Y => "y".to_string(),
+        KeyCode::KEY_Z => "z".to_string(),
+
+        KeyCode::KEY_0 => "0".to_string(),
+        KeyCode::KEY_1 => "1".to_string(),
+        KeyCode::KEY_2 => "2".to_string(),
+        KeyCode::KEY_3 => "3".to_string(),
+        KeyCode::KEY_4 => "4".to_string(),
+        KeyCode::KEY_5 => "5".to_string(),
+        KeyCode::KEY_6 => "6".to_string(),
+        KeyCode::KEY_7 => "7".to_string(),
+        KeyCode::KEY_8 => "8".to_string(),
+        KeyCode::KEY_9 => "9".to_string(),
+
+        KeyCode::KEY_SPACE      => "Space".to_string(),
+        KeyCode::KEY_ENTER      => "Enter".to_string(),
+        KeyCode::KEY_TAB        => "Tab".to_string(),
+        KeyCode::KEY_BACKSPACE  => "Backspace".to_string(),
+        KeyCode::KEY_DELETE     => "Delete".to_string(),
+        KeyCode::KEY_ESC        => "Esc".to_string(),
+        KeyCode::KEY_CAPSLOCK   => "CapsLock".to_string(),
+
+        KeyCode::KEY_UP         => "Up".to_string(),
+        KeyCode::KEY_DOWN       => "Down".to_string(),
+        KeyCode::KEY_LEFT       => "Left".to_string(),
+        KeyCode::KEY_RIGHT      => "Right".to_string(),
+
+        KeyCode::KEY_HOME       => "Home".to_string(),
+        KeyCode::KEY_END        => "End".to_string(),
+        KeyCode::KEY_PAGEUP     => "PgUp".to_string(),
+        KeyCode::KEY_PAGEDOWN   => "PgDn".to_string(),
+        KeyCode::KEY_INSERT     => "Insert".to_string(),
+
+        KeyCode::KEY_F1  => "F1".to_string(),
+        KeyCode::KEY_F2  => "F2".to_string(),
+        KeyCode::KEY_F3  => "F3".to_string(),
+        KeyCode::KEY_F4  => "F4".to_string(),
+        KeyCode::KEY_F5  => "F5".to_string(),
+        KeyCode::KEY_F6  => "F6".to_string(),
+        KeyCode::KEY_F7  => "F7".to_string(),
+        KeyCode::KEY_F8  => "F8".to_string(),
+        KeyCode::KEY_F9  => "F9".to_string(),
+        KeyCode::KEY_F10 => "F10".to_string(),
+        KeyCode::KEY_F11 => "F11".to_string(),
+        KeyCode::KEY_F12 => "F12".to_string(),
+        KeyCode::KEY_F13 => "F13".to_string(),
+        KeyCode::KEY_F14 => "F14".to_string(),
+        KeyCode::KEY_F15 => "F15".to_string(),
+        KeyCode::KEY_F16 => "F16".to_string(),
+        KeyCode::KEY_F17 => "F17".to_string(),
+        KeyCode::KEY_F18 => "F18".to_string(),
+        KeyCode::KEY_F19 => "F19".to_string(),
+        KeyCode::KEY_F20 => "F20".to_string(),
+        KeyCode::KEY_F21 => "F21".to_string(),
+        KeyCode::KEY_F22 => "F22".to_string(),
+        KeyCode::KEY_F23 => "F23".to_string(),
+        KeyCode::KEY_F24 => "F24".to_string(),
+
+        // Add more as needed (media keys, etc.)
+        KeyCode::KEY_PLAYPAUSE    => "Media_Play_Pause".to_string(),
+        KeyCode::KEY_NEXTSONG     => "Media_Next".to_string(),
+        KeyCode::KEY_PREVIOUSSONG => "Media_Prev".to_string(),
+        KeyCode::KEY_VOLUMEUP     => "Volume_Up".to_string(),
+        KeyCode::KEY_VOLUMEDOWN   => "Volume_Down".to_string(),
+        KeyCode::KEY_MUTE         => "Volume_Mute".to_string(),
+
+        _ => return Err(format!("Cannot pass through unknown key: {:?}", key)),
+    };
+
+    // Final Send string: modifiers + {key}
+    send_str.push_str(&format!("{{{}}}", key_name));
+
+    AhkAction::IfWinActive {
+        criteria,
+        then_actions: vec![action],
+        else_actions: Some(vec![AhkAction::Send(send_str)]),
+    }
+} else {
+    // No context → normal unconditional hotkey
+    action
+};
+
+Ok(Some(AhkHotkey {
+    modifiers,
+    key,
+    action: final_action,
+    context: None,          // We already consumed/used the context
+    is_wildcard,
+}))
+    
+    
+    }
+
+    
 
     fn parse_key_combo(&self, combo: &str) -> Result<(Vec<KeyCode>, KeyCode, bool), String> {
         let mut modifiers = Vec::new();
