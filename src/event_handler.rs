@@ -748,6 +748,7 @@ impl EventHandler {
             match self.application_client.current_window() {
                 Some(title) if !title.is_empty() => self.title_cache = Some(title),
                 _ => {
+                    #[cfg(feature = "kde")]
                     if let Ok(output) = std::process::Command::new("kdotool")
                         .arg("getactivewindow")
                         .arg("getwindowname")
@@ -759,6 +760,16 @@ impl EventHandler {
                         } else {
                             self.title_cache = Some(String::new());
                         }
+
+                    #[cfg(not(feature = "kde"))]
+                    {
+                        self.title_cache = Some(String::new());
+                    }
+
+                    #[cfg(not(feature = "kde"))]
+                    {
+                        self.application_cache = Some(String::new());
+                    }
                     } else {
                         self.title_cache = Some(String::new());
                     }
@@ -782,6 +793,7 @@ impl EventHandler {
             match self.application_client.current_application() {
                 Some(application) if !application.is_empty() => self.application_cache = Some(application),
                 _ => {
+                    #[cfg(feature = "kde")]
                     if let Ok(output) = std::process::Command::new("kdotool")
                         .arg("getactivewindow")
                         .arg("getwindowclassname")
@@ -793,6 +805,11 @@ impl EventHandler {
                         } else {
                             self.application_cache = Some(String::new());
                         }
+
+                    #[cfg(not(feature = "kde"))]
+                    {
+                        self.application_cache = Some(String::new());
+                    }
                     } else {
                         self.application_cache = Some(String::new());
                     }

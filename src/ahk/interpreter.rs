@@ -7,13 +7,10 @@ use std::error::Error;
 use std::time::Duration;
 use std::collections::HashSet;
 
-/// The AHK Runtime Interpreter
-/// Executes AHK actions at runtime, similar to AutoHotkey's script engine
 pub struct AhkInterpreter<'a> {
     wm_client: &'a mut WMClient,
     application_cache: Option<String>,
     title_cache: Option<String>,
-    // Track which virtual modifiers are currently held (passed from event_handler)
     active_virtual_modifiers: HashSet<Key>,
 }
 
@@ -27,20 +24,17 @@ impl<'a> AhkInterpreter<'a> {
         }
     }
 
-    // Called by event_handler before executing hotkey action
     pub fn set_virtual_modifiers(&mut self, modifiers: &[Key]) {
         self.active_virtual_modifiers = modifiers.iter().copied().collect();
         eprintln!("DEBUG: Set active virtual modifiers: {:?}", self.active_virtual_modifiers);
     }
 
-    /// Execute an AHK action and return the resulting low-level Actions
     pub fn execute(&mut self, action: &AhkAction) -> Result<Vec<Action>, Box<dyn Error>> {
         let mut actions = Vec::new();
         self.execute_into(action, &mut actions)?;
         Ok(actions)
     }
 
-    /// Execute an AHK action, appending results to the actions vector
     fn execute_into(&mut self, action: &AhkAction, actions: &mut Vec<Action>) -> Result<(), Box<dyn Error>> {
         match action {
             AhkAction::Run(parts) => {
@@ -60,18 +54,14 @@ impl<'a> AhkInterpreter<'a> {
                 eprintln!("DEBUG INTERPRETER: Converting Send('{}') with virtual modifiers: {:?}", 
                     keys, self.active_virtual_modifiers);
                 
-                // CRITICAL: Release virtual modifiers before sending anything
-                // This prevents CapsLock (or other virtual modifiers) from interfering
                 for modifier in &self.active_virtual_modifiers {
                     eprintln!("DEBUG: Releasing virtual modifier: {:?}", modifier);
                     actions.push(Action::KeyEvent(KeyEvent::new(*modifier, KeyValue::Release)));
                 }
                 
-                // Send the actual keys
                 let send_actions = self.convert_send_to_actions(keys);
                 actions.extend(send_actions);
                 
-                // Re-press virtual modifiers so they're still "held" for next combo
                 for modifier in &self.active_virtual_modifiers {
                     eprintln!("DEBUG: Re-pressing virtual modifier: {:?}", modifier);
                     actions.push(Action::KeyEvent(KeyEvent::new(*modifier, KeyValue::Press)));
@@ -79,7 +69,6 @@ impl<'a> AhkInterpreter<'a> {
             }
 
             AhkAction::Remap(target_keys) => {
-                // Same fix for Remap
                 for modifier in &self.active_virtual_modifiers {
                     actions.push(Action::KeyEvent(KeyEvent::new(*modifier, KeyValue::Release)));
                 }
@@ -107,7 +96,6 @@ impl<'a> AhkInterpreter<'a> {
             }
 
             AhkAction::Block(block_actions) => {
-                // Execute a sequence of actions
                 for block_action in block_actions {
                     self.execute_into(block_action, actions)?;
                 }
@@ -124,7 +112,6 @@ impl<'a> AhkInterpreter<'a> {
             }
 
             AhkAction::IfWinActive { criteria, then_actions, else_actions } => {
-                // THIS IS THE KEY PART - Runtime evaluation!
                 eprintln!("DEBUG INTERPRETER: Evaluating IfWinActive at runtime");
                 
                 let is_active = self.check_window_active(criteria)?;
@@ -144,11 +131,9 @@ impl<'a> AhkInterpreter<'a> {
             }
 
             AhkAction::WinWaitActive { criteria, timeout_ms } => {
-                // WinWaitActive blocks until window is active
                 let poll_interval_ms = 50;
                 
                 if let Some(timeout) = timeout_ms {
-                    // Finite timeout
                     let max_attempts = timeout / poll_interval_ms;
                     eprintln!("DEBUG: WinWaitActive - waiting for window (timeout: {}ms)", timeout);
                     
@@ -162,7 +147,6 @@ impl<'a> AhkInterpreter<'a> {
                     
                     eprintln!("DEBUG: WinWaitActive - timed out after {} ms", timeout);
                 } else {
-                    // Infinite timeout - wait forever
                     eprintln!("DEBUG: WinWaitActive - waiting for window (no timeout)");
                     let mut elapsed = 0u64;
                     
@@ -182,19 +166,18 @@ impl<'a> AhkInterpreter<'a> {
     }
 
     fn check_window_active(&mut self, criteria: &WindowCriteria) -> Result<bool, Box<dyn Error>> {
-        // FORCE fresh check - clear cache
         self.application_cache = None;
         self.title_cache = None;
         
-        // Small delay to allow WM to update (if WinActivate was just called)
         std::thread::sleep(std::time::Duration::from_millis(50));
 
         match criteria {
             WindowCriteria::Exe(exe) => {
-                // Get FRESH window class
-                let window_class = self.wm_client.current_application()
-                    .or_else(|| {
-                        // Fallback to kdotool
+                let mut window_class = self.wm_client.current_application();
+                
+                #[cfg(feature = "kde")]
+                {
+                    window_class = window_class.or_else(|| {
                         std::process::Command::new("kdotool")
                             .arg("getactivewindow")
                             .arg("getwindowclassname")
@@ -207,16 +190,20 @@ impl<'a> AhkInterpreter<'a> {
                                     None
                                 }
                             })
-                    })
-                    .unwrap_or_default();
+                    });
+                }
                 
+                let window_class = window_class.unwrap_or_default();
                 eprintln!("DEBUG: Checking if '{}' == '{}'", window_class, exe);
                 Ok(window_class == *exe)
             }
             
             WindowCriteria::Class(class) => {
-                let window_class = self.wm_client.current_application()
-                    .or_else(|| {
+                let mut window_class = self.wm_client.current_application();
+                
+                #[cfg(feature = "kde")]
+                {
+                    window_class = window_class.or_else(|| {
                         std::process::Command::new("kdotool")
                             .arg("getactivewindow")
                             .arg("getwindowclassname")
@@ -229,16 +216,20 @@ impl<'a> AhkInterpreter<'a> {
                                     None
                                 }
                             })
-                    })
-                    .unwrap_or_default();
-
+                    });
+                }
+                
+                let window_class = window_class.unwrap_or_default();
                 eprintln!("DEBUG: Checking if '{}' == '{}'", window_class, class);
                 Ok(window_class == *class)
             }
 
             WindowCriteria::Title(title) => {
-                let window_title = self.wm_client.current_window()
-                    .or_else(|| {
+                let mut window_title = self.wm_client.current_window();
+                
+                #[cfg(feature = "kde")]
+                {
+                    window_title = window_title.or_else(|| {
                         std::process::Command::new("kdotool")
                             .arg("getactivewindow")
                             .arg("getwindowname")
@@ -251,9 +242,10 @@ impl<'a> AhkInterpreter<'a> {
                                     None
                                 }
                             })
-                    })
-                    .unwrap_or_default();
-
+                    });
+                }
+                
+                let window_title = window_title.unwrap_or_default();
                 eprintln!("DEBUG: Checking if '{}' == '{}'", window_title, title);
                 Ok(window_title == *title)
             }
@@ -273,19 +265,16 @@ impl<'a> AhkInterpreter<'a> {
                     for ch in text.chars() {
                         if let Some((key, needs_shift)) = self.char_to_key_with_shift(ch) {
                             if needs_shift {
-                                // Press Shift
                                 actions.push(Action::KeyEvent(KeyEvent::new(
                                     Key::KEY_LEFTSHIFT, 
                                     KeyValue::Press
                                 )));
                             }
                             
-                            // Press and release the key
                             actions.push(Action::KeyEvent(KeyEvent::new(key, KeyValue::Press)));
                             actions.push(Action::KeyEvent(KeyEvent::new(key, KeyValue::Release)));
                             
                             if needs_shift {
-                                // Release Shift
                                 actions.push(Action::KeyEvent(KeyEvent::new(
                                     Key::KEY_LEFTSHIFT, 
                                     KeyValue::Release
@@ -295,14 +284,11 @@ impl<'a> AhkInterpreter<'a> {
                     }
                 }
                 SendToken::Key { key, modifiers } => {
-                    // Press modifiers
                     for modifier in &modifiers {
                         actions.push(Action::KeyEvent(KeyEvent::new(*modifier, KeyValue::Press)));
                     }
-                    // Press/release main key
                     actions.push(Action::KeyEvent(KeyEvent::new(key, KeyValue::Press)));
                     actions.push(Action::KeyEvent(KeyEvent::new(key, KeyValue::Release)));
-                    // Release modifiers
                     for modifier in modifiers.iter().rev() {
                         actions.push(Action::KeyEvent(KeyEvent::new(*modifier, KeyValue::Release)));
                     }
@@ -314,9 +300,7 @@ impl<'a> AhkInterpreter<'a> {
     }
 
     fn char_to_key_with_shift(&self, ch: char) -> Option<(Key, bool)> {
-        // Returns (Key, needs_shift)
         match ch {
-            // Lowercase letters - no shift
             'a'..='z' => {
                 let key = match ch {
                     'a' => Key::KEY_A, 'b' => Key::KEY_B, 'c' => Key::KEY_C,
@@ -332,8 +316,6 @@ impl<'a> AhkInterpreter<'a> {
                 };
                 Some((key, false))
             }
-            
-            // Uppercase letters - need shift
             'A'..='Z' => {
                 let key = match ch {
                     'A' => Key::KEY_A, 'B' => Key::KEY_B, 'C' => Key::KEY_C,
@@ -349,8 +331,6 @@ impl<'a> AhkInterpreter<'a> {
                 };
                 Some((key, true))
             }
-            
-            // Numbers - no shift
             '0' => Some((Key::KEY_0, false)),
             '1' => Some((Key::KEY_1, false)),
             '2' => Some((Key::KEY_2, false)),
@@ -361,8 +341,6 @@ impl<'a> AhkInterpreter<'a> {
             '7' => Some((Key::KEY_7, false)),
             '8' => Some((Key::KEY_8, false)),
             '9' => Some((Key::KEY_9, false)),
-            
-            // Shifted number symbols
             '!' => Some((Key::KEY_1, true)),
             '@' => Some((Key::KEY_2, true)),
             '#' => Some((Key::KEY_3, true)),
@@ -373,8 +351,6 @@ impl<'a> AhkInterpreter<'a> {
             '*' => Some((Key::KEY_8, true)),
             '(' => Some((Key::KEY_9, true)),
             ')' => Some((Key::KEY_0, true)),
-            
-            // Punctuation
             ' ' => Some((Key::KEY_SPACE, false)),
             '.' => Some((Key::KEY_DOT, false)),
             ',' => Some((Key::KEY_COMMA, false)),
@@ -387,8 +363,6 @@ impl<'a> AhkInterpreter<'a> {
             ']' => Some((Key::KEY_RIGHTBRACE, false)),
             '\\' => Some((Key::KEY_BACKSLASH, false)),
             '`' => Some((Key::KEY_GRAVE, false)),
-            
-            // Shifted punctuation
             ':' => Some((Key::KEY_SEMICOLON, true)),
             '?' => Some((Key::KEY_SLASH, true)),
             '"' => Some((Key::KEY_APOSTROPHE, true)),
@@ -400,14 +374,13 @@ impl<'a> AhkInterpreter<'a> {
             '~' => Some((Key::KEY_GRAVE, true)),
             '<' => Some((Key::KEY_COMMA, true)),
             '>' => Some((Key::KEY_DOT, true)),
-            
             '\n' => Some((Key::KEY_ENTER, false)),
             '\t' => Some((Key::KEY_TAB, false)),
-            
             _ => None,
         }
     }
 
+    #[cfg(feature = "kde")]
     fn build_kdotool_command(&self, action: &str, criteria: &WindowCriteria) -> Vec<String> {
         let mut cmd = vec!["kdotool".to_string(), "search".to_string()];
         
@@ -428,5 +401,10 @@ impl<'a> AhkInterpreter<'a> {
         
         cmd.push(action.to_string());
         cmd
+    }
+
+    #[cfg(not(feature = "kde"))]
+    fn build_kdotool_command(&self, _action: &str, _criteria: &WindowCriteria) -> Vec<String> {
+        vec![]
     }
 }

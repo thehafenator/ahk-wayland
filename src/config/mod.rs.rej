@@ -1,0 +1,13 @@
+--- src/config/mod.rs
++++ src/config/mod.rs
+@@ -570,6 +570,10 @@ fn convert_ahk_hotkey_to_keymap(hotkey: crate::ahk::AhkHotkey) -> Keymap {
+     let mut keymap = Keymap::default();
+ 
++    eprintln!("CONVERT HOTKEY: trigger={} action={:?} context={:?}",
++              hotkey.trigger(),
++              hotkey.action,
++              hotkey.context);
+ 
+     if let Some(context) = &hotkey.context {
+         if context.contains("ahk_exe") {
+ 

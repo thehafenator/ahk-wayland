@@ -65,45 +65,21 @@ impl WMClient {
 
 #[cfg(feature = "gnome")]
 mod gnome_client;
-#[cfg(feature = "gnome")]
-pub fn build_client() -> WMClient {
-    WMClient::new("GNOME", Box::new(gnome_client::GnomeClient::new()))
-}
 
 #[cfg(feature = "kde")]
 mod kde_client;
-#[cfg(feature = "kde")]
-pub fn build_client() -> WMClient {
-    WMClient::new("KDE", Box::new(kde_client::KdeClient::new()))
-}
 
 #[cfg(feature = "hypr")]
 mod hypr_client;
-#[cfg(feature = "hypr")]
-pub fn build_client() -> WMClient {
-    WMClient::new("Hypr", Box::new(hypr_client::HyprlandClient::new()))
-}
 
 #[cfg(feature = "x11")]
 mod x11_client;
-#[cfg(feature = "x11")]
-pub fn build_client() -> WMClient {
-    WMClient::new("X11", Box::new(x11_client::X11Client::new()))
-}
 
 #[cfg(feature = "wlroots")]
 mod wlroots_client;
-#[cfg(feature = "wlroots")]
-pub fn build_client() -> WMClient {
-    WMClient::new("wlroots", Box::new(wlroots_client::WlRootsClient::new()))
-}
 
 #[cfg(feature = "niri")]
 mod niri_client;
-#[cfg(feature = "niri")]
-pub fn build_client() -> WMClient {
-    WMClient::new("Niri", Box::new(niri_client::NiriClient::new()))
-}
 
 #[cfg(not(any(
     feature = "gnome",
@@ -114,14 +90,47 @@ pub fn build_client() -> WMClient {
     feature = "niri"
 )))]
 mod null_client;
-#[cfg(not(any(
-    feature = "gnome",
-    feature = "x11",
-    feature = "hypr",
-    feature = "kde",
-    feature = "wlroots",
-    feature = "niri"
-)))]
+
 pub fn build_client() -> WMClient {
-    WMClient::new("none", Box::new(null_client::NullClient))
+    #[cfg(feature = "gnome")]
+    {
+        return WMClient::new("GNOME", Box::new(gnome_client::GnomeClient::new()));
+    }
+    
+    #[cfg(all(feature = "kde", not(feature = "gnome")))]
+    {
+        return WMClient::new("KDE", Box::new(kde_client::KdeClient::new()));
+    }
+    
+    #[cfg(all(feature = "hypr", not(any(feature = "gnome", feature = "kde"))))]
+    {
+        return WMClient::new("Hypr", Box::new(hypr_client::HyprlandClient::new()));
+    }
+    
+    #[cfg(all(feature = "x11", not(any(feature = "gnome", feature = "kde", feature = "hypr"))))]
+    {
+        return WMClient::new("X11", Box::new(x11_client::X11Client::new()));
+    }
+    
+    #[cfg(all(feature = "wlroots", not(any(feature = "gnome", feature = "x11", feature = "hypr", feature = "kde"))))]
+    {
+        return WMClient::new("wlroots", Box::new(wlroots_client::WlRootsClient::new()));
+    }
+    
+    #[cfg(all(feature = "niri", not(any(feature = "gnome", feature = "x11", feature = "hypr", feature = "kde", feature = "wlroots"))))]
+    {
+        return WMClient::new("Niri", Box::new(niri_client::NiriClient::new()));
+    }
+    
+    #[cfg(not(any(
+        feature = "gnome",
+        feature = "x11",
+        feature = "hypr",
+        feature = "kde",
+        feature = "wlroots",
+        feature = "niri"
+    )))]
+    {
+        return WMClient::new("none", Box::new(null_client::NullClient));
+    }
 }
