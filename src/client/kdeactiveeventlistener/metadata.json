@@ -1,0 +1,17 @@
+{
+    "KPlugin": {
+        "Name": "AHK-Wayland Active Window Monitor",
+        "Description": "Monitors active window changes for AHK-Wayland",
+        "Icon": "preferences-system-windows",
+        "Category": "Accessibility",
+        "EnabledByDefault": true,
+        "Id": "ahk-wayland-activeclient",
+        "Version": "1.0",
+        "License": "GPL",
+        "Authors": [
+            {
+                "Name": "Michael Hafen"
+            }
+        ]
+    }
+}
