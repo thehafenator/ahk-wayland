@@ -173,82 +173,82 @@ impl<'a> AhkInterpreter<'a> {
 
         match criteria {
             WindowCriteria::Exe(exe) => {
-                let mut window_class = self.wm_client.current_application();
-                
-                #[cfg(feature = "kde")]
-                {
-                    window_class = window_class.or_else(|| {
-                        std::process::Command::new("kdotool")
-                            .arg("getactivewindow")
-                            .arg("getwindowclassname")
-                            .output()
-                            .ok()
-                            .and_then(|out| {
-                                if out.status.success() {
-                                    Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
-                                } else {
-                                    None
-                                }
-                            })
-                    });
-                }
-                
-                let window_class = window_class.unwrap_or_default();
-                eprintln!("DEBUG: Checking if '{}' == '{}'", window_class, exe);
-                Ok(window_class == *exe)
-            }
-            
-            WindowCriteria::Class(class) => {
-                let mut window_class = self.wm_client.current_application();
-                
-                #[cfg(feature = "kde")]
-                {
-                    window_class = window_class.or_else(|| {
-                        std::process::Command::new("kdotool")
-                            .arg("getactivewindow")
-                            .arg("getwindowclassname")
-                            .output()
-                            .ok()
-                            .and_then(|out| {
-                                if out.status.success() {
-                                    Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
-                                } else {
-                                    None
-                                }
-                            })
-                    });
-                }
-                
-                let window_class = window_class.unwrap_or_default();
-                eprintln!("DEBUG: Checking if '{}' == '{}'", window_class, class);
-                Ok(window_class == *class)
-            }
+    let mut window_class = self.wm_client.current_application();
+    
+    #[cfg(feature = "kde")]
+    {
+        window_class = window_class.or_else(|| {
+            std::process::Command::new("kdotool")
+                .arg("getactivewindow")
+                .arg("getwindowclassname")
+                .output()
+                .ok()
+                .and_then(|out| {
+                    if out.status.success() {
+                        Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+                    } else {
+                        None
+                    }
+                })
+        });
+    }
+    
+    let window_class = window_class.unwrap_or_default();
+    eprintln!("DEBUG: Checking if '{}' == '{}'", window_class, exe);
+    Ok(window_class == *exe)
+}
 
-            WindowCriteria::Title(title) => {
-                let mut window_title = self.wm_client.current_window();
-                
-                #[cfg(feature = "kde")]
-                {
-                    window_title = window_title.or_else(|| {
-                        std::process::Command::new("kdotool")
-                            .arg("getactivewindow")
-                            .arg("getwindowname")
-                            .output()
-                            .ok()
-                            .and_then(|out| {
-                                if out.status.success() {
-                                    Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
-                                } else {
-                                    None
-                                }
-                            })
-                    });
-                }
-                
-                let window_title = window_title.unwrap_or_default();
-                eprintln!("DEBUG: Checking if '{}' == '{}'", window_title, title);
-                Ok(window_title == *title)
-            }
+WindowCriteria::Class(class) => {
+    let mut window_class = self.wm_client.current_application();
+    
+    #[cfg(feature = "kde")]
+    {
+        window_class = window_class.or_else(|| {
+            std::process::Command::new("kdotool")
+                .arg("getactivewindow")
+                .arg("getwindowclassname")
+                .output()
+                .ok()
+                .and_then(|out| {
+                    if out.status.success() {
+                        Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+                    } else {
+                        None
+                    }
+                })
+        });
+    }
+    
+    let window_class = window_class.unwrap_or_default();
+    eprintln!("DEBUG: Checking if '{}' == '{}'", window_class, class);
+    Ok(window_class == *class)
+}
+
+WindowCriteria::Title(title) => {
+    let mut window_title = self.wm_client.current_window();
+    
+    #[cfg(feature = "kde")]
+    {
+        window_title = window_title.or_else(|| {
+            std::process::Command::new("kdotool")
+                .arg("getactivewindow")
+                .arg("getwindowname")
+                .output()
+                .ok()
+                .and_then(|out| {
+                    if out.status.success() {
+                        Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+                    } else {
+                        None
+                    }
+                })
+        });
+    }
+    
+    let window_title = window_title.unwrap_or_default();
+    eprintln!("DEBUG: Checking if '{}' == '{}'", window_title, title);
+    Ok(window_title == *title)
+}
         }
     }
 
