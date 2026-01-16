@@ -1,0 +1,28 @@
+   Compiling ahk-wayland v0.14.5 (/home/michael/ahk-wayland)
+warning: ahk-wayland@0.14.5: Building KWin plugin for KDE support...
+warning: ahk-wayland@0.14.5: Cleaning old build...
+warning: ahk-wayland@0.14.5: Configuring CMake...
+warning: ahk-wayland@0.14.5: Configuring for NixOS...
+warning: ahk-wayland@0.14.5: Set OPENGL_gl_LIBRARY: /nix/store/638y6yx9m2f5il7azqy1fn3hcczwjvfx-mesa-25.3.3/lib/libGL.so
+warning: ahk-wayland@0.14.5: ✗ CMake failed:
+warning: ahk-wayland@0.14.5:   Installing in /home/michael/.local. Run /home/michael/ahk-wayland/src/client/kdeactiveeventlistener/build/prefix.sh to set the environment for ahk-wayland-activeclient.
+warning: ahk-wayland@0.14.5:   CMake Warning at /run/current-system/sw/share/cmake-4.1/Modules/CMakeFindDependencyMacro.cmake:78 (find_package):
+warning: ahk-wayland@0.14.5:     Found package configuration file:
+warning: ahk-wayland@0.14.5: 
+warning: ahk-wayland@0.14.5:       /nix/store/jq8mka96cq81mfzm4svzmbalna8asqfn-qtbase-6.10.1/lib/cmake/Qt6Gui/Qt6GuiConfig.cmake
+warning: ahk-wayland@0.14.5: 
+warning: ahk-wayland@0.14.5:     but it set Qt6Gui_FOUND to FALSE so package "Qt6Gui" is considered to be
+warning: ahk-wayland@0.14.5:     NOT FOUND.  Reason given by package:
+warning: ahk-wayland@0.14.5: 
+warning: ahk-wayland@0.14.5:     Qt6Gui could not be found because dependency WrapOpenGL could not be found.
+warning: ahk-wayland@0.14.5: 
+warning: ahk-wayland@0.14.5:     Configuring with --debug-find-pkg=WrapOpenGL might reveal details why the
+warning: ahk-wayland@0.14.5:     package was not found.
+warning: ahk-wayland@0.14.5: 
+warning: ahk-wayland@0.14.5:     Configuring with -DQT_DEBUG_FIND_PACKAGE=ON will print the values of some
+warning: ahk-wayland@0.14.5:     of the path variables that find_package uses to try and find the package.
+warning: ahk-wayland@0.14.5: 
+warning: ahk-wayland@0.14.5:   Call Stack (most recent call first):
+warning: ahk-wayland@0.14.5:     /nix/store/jq8mka96cq81mfzm4svzmbalna8asqfn-qtbase-6.10.1/lib/cmake/Qt6/QtPublicDependencyHelpers.cmake:142 (find_dependency)
+warning: ahk-wayland@0.14.5:     /nix/store/jq8mka96cq81mfzm4svzmbalna8asqfn-qtbase-6.10.1/lib/cmake/Qt6Widgets/Qt6WidgetsDependencies.cmake:49 (_qt_internal_find_qt_dependencies)
+    Finished `release` profile [optimized] target(s) in 10.55s
