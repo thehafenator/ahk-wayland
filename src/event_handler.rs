@@ -1,6 +1,7 @@
 use crate::action::Action;
 use crate::client::WMClient;
 use crate::config::application::OnlyOrNot;
+use crate::config::application::ApplicationMatcher;
 use crate::config::key_press::{KeyPress, Modifier};
 use crate::config::keymap::{build_override_table, OverrideEntry};
 use crate::config::keymap_action::KeymapAction;
@@ -91,193 +92,220 @@ impl EventHandler {
         Ok(self.actions.drain(..).collect())
     }
 
-    fn key_to_char(&mut self, key: &Key) -> Option<String> {
-        match *key {
-            Key::KEY_A => Some("a".to_string()),
-            Key::KEY_B => Some("b".to_string()),
-            Key::KEY_C => Some("c".to_string()),
-            Key::KEY_D => Some("d".to_string()),
-            Key::KEY_E => Some("e".to_string()),
-            Key::KEY_F => Some("f".to_string()),
-            Key::KEY_G => Some("g".to_string()),
-            Key::KEY_H => Some("h".to_string()),
-            Key::KEY_I => Some("i".to_string()),
-            Key::KEY_J => Some("j".to_string()),
-            Key::KEY_K => Some("k".to_string()),
-            Key::KEY_L => Some("l".to_string()),
-            Key::KEY_M => Some("m".to_string()),
-            Key::KEY_N => Some("n".to_string()),
-            Key::KEY_O => Some("o".to_string()),
-            Key::KEY_P => Some("p".to_string()),
-            Key::KEY_Q => Some("q".to_string()),
-            Key::KEY_R => Some("r".to_string()),
-            Key::KEY_S => Some("s".to_string()),
-            Key::KEY_T => Some("t".to_string()),
-            Key::KEY_U => Some("u".to_string()),
-            Key::KEY_V => Some("v".to_string()),
-            Key::KEY_W => Some("w".to_string()),
-            Key::KEY_X => Some("x".to_string()),
-            Key::KEY_Y => Some("y".to_string()),
-            Key::KEY_Z => Some("z".to_string()),
-            Key::KEY_0 => Some("0".to_string()),
-            Key::KEY_1 => Some("1".to_string()),
-            Key::KEY_2 => Some("2".to_string()),
-            Key::KEY_3 => Some("3".to_string()),
-            Key::KEY_4 => Some("4".to_string()),
-            Key::KEY_5 => Some("5".to_string()),
-            Key::KEY_6 => Some("6".to_string()),
-            Key::KEY_7 => Some("7".to_string()),
-            Key::KEY_8 => Some("8".to_string()),
-            Key::KEY_9 => Some("9".to_string()),
-            Key::KEY_DOT => Some(".".to_string()),
-            Key::KEY_COMMA => Some(",".to_string()),
-            Key::KEY_SEMICOLON => Some(";".to_string()),
-            Key::KEY_SLASH => Some("/".to_string()),
-            Key::KEY_APOSTROPHE => Some("'".to_string()),
-            Key::KEY_MINUS => Some("-".to_string()),
-            Key::KEY_EQUAL => Some("=".to_string()),
-            Key::KEY_LEFTBRACE => Some("[".to_string()),
-            Key::KEY_RIGHTBRACE => Some("]".to_string()),
-            Key::KEY_BACKSLASH => Some("\\".to_string()),
-            Key::KEY_GRAVE => Some("`".to_string()),
-            Key::KEY_SPACE => Some(" ".to_string()),
-            Key::KEY_TAB => Some("\t".to_string()),
-            Key::KEY_ENTER => Some("\n".to_string()),
-            Key::KEY_BACKSPACE => {
-                self.hotstring_state = None;
-                self.hotstring_buffer.clear();
-                if !self.hotstring_buffer.is_empty() {
-                    self.hotstring_buffer.pop();
-                }
-                None
+fn key_to_char(&mut self, key: &Key) -> Option<String> {
+    match *key {
+        Key::KEY_A => Some("a".to_string()),
+        Key::KEY_B => Some("b".to_string()),
+        Key::KEY_C => Some("c".to_string()),
+        Key::KEY_D => Some("d".to_string()),
+        Key::KEY_E => Some("e".to_string()),
+        Key::KEY_F => Some("f".to_string()),
+        Key::KEY_G => Some("g".to_string()),
+        Key::KEY_H => Some("h".to_string()),
+        Key::KEY_I => Some("i".to_string()),
+        Key::KEY_J => Some("j".to_string()),
+        Key::KEY_K => Some("k".to_string()),
+        Key::KEY_L => Some("l".to_string()),
+        Key::KEY_M => Some("m".to_string()),
+        Key::KEY_N => Some("n".to_string()),
+        Key::KEY_O => Some("o".to_string()),
+        Key::KEY_P => Some("p".to_string()),
+        Key::KEY_Q => Some("q".to_string()),
+        Key::KEY_R => Some("r".to_string()),
+        Key::KEY_S => Some("s".to_string()),
+        Key::KEY_T => Some("t".to_string()),
+        Key::KEY_U => Some("u".to_string()),
+        Key::KEY_V => Some("v".to_string()),
+        Key::KEY_W => Some("w".to_string()),
+        Key::KEY_X => Some("x".to_string()),
+        Key::KEY_Y => Some("y".to_string()),
+        Key::KEY_Z => Some("z".to_string()),
+        Key::KEY_0 => Some("0".to_string()),
+        Key::KEY_1 => Some("1".to_string()),
+        Key::KEY_2 => Some("2".to_string()),
+        Key::KEY_3 => Some("3".to_string()),
+        Key::KEY_4 => Some("4".to_string()),
+        Key::KEY_5 => Some("5".to_string()),
+        Key::KEY_6 => Some("6".to_string()),
+        Key::KEY_7 => Some("7".to_string()),
+        Key::KEY_8 => Some("8".to_string()),
+        Key::KEY_9 => Some("9".to_string()),
+        Key::KEY_DOT => Some(".".to_string()),
+        Key::KEY_COMMA => Some(",".to_string()),
+        Key::KEY_SEMICOLON => Some(";".to_string()),
+        Key::KEY_SLASH => Some("/".to_string()),
+        Key::KEY_APOSTROPHE => Some("'".to_string()),
+        Key::KEY_MINUS => Some("-".to_string()),
+        Key::KEY_EQUAL => Some("=".to_string()),
+        Key::KEY_LEFTBRACE => Some("[".to_string()),
+        Key::KEY_RIGHTBRACE => Some("]".to_string()),
+        Key::KEY_BACKSLASH => Some("\\".to_string()),
+        Key::KEY_GRAVE => Some("`".to_string()),
+        Key::KEY_SPACE => Some(" ".to_string()),
+        Key::KEY_TAB => Some("\t".to_string()),
+        Key::KEY_ENTER => Some("\n".to_string()),
+        Key::KEY_BACKSPACE => {
+            // Just pop one char from buffer, DON'T reset state
+            if !self.hotstring_buffer.is_empty() {
+                self.hotstring_buffer.pop();
             }
-            Key::KEY_LEFTSHIFT | Key::KEY_RIGHTSHIFT | Key::KEY_LEFTCTRL | Key::KEY_RIGHTCTRL
-            | Key::KEY_LEFTALT | Key::KEY_RIGHTALT | Key::KEY_LEFTMETA | Key::KEY_RIGHTMETA
-            | Key::KEY_UP | Key::KEY_DOWN | Key::KEY_LEFT | Key::KEY_RIGHT
-            | Key::KEY_HOME | Key::KEY_END | Key::KEY_PAGEUP | Key::KEY_PAGEDOWN
-            | Key::KEY_F1 | Key::KEY_F2 | Key::KEY_F3 | Key::KEY_F4 | Key::KEY_F5 | Key::KEY_F6
-            | Key::KEY_F7 | Key::KEY_F8 | Key::KEY_F9 | Key::KEY_F10 | Key::KEY_F11 | Key::KEY_F12
-            | Key::KEY_ESC | Key::KEY_DELETE | Key::KEY_INSERT | Key::KEY_CAPSLOCK => None,
-            _ => None,
+            // Return None so hotstring matcher doesn't process this
+            None
         }
+        Key::KEY_LEFTSHIFT | Key::KEY_RIGHTSHIFT | Key::KEY_LEFTCTRL | Key::KEY_RIGHTCTRL
+        | Key::KEY_LEFTALT | Key::KEY_RIGHTALT | Key::KEY_LEFTMETA | Key::KEY_RIGHTMETA
+        | Key::KEY_UP | Key::KEY_DOWN | Key::KEY_LEFT | Key::KEY_RIGHT
+        | Key::KEY_HOME | Key::KEY_END | Key::KEY_PAGEUP | Key::KEY_PAGEDOWN
+        | Key::KEY_F1 | Key::KEY_F2 | Key::KEY_F3 | Key::KEY_F4 | Key::KEY_F5 | Key::KEY_F6
+        | Key::KEY_F7 | Key::KEY_F8 | Key::KEY_F9 | Key::KEY_F10 | Key::KEY_F11 | Key::KEY_F12
+        | Key::KEY_ESC | Key::KEY_DELETE | Key::KEY_INSERT | Key::KEY_CAPSLOCK => {
+            // Navigation/modifier/function keys CLEAR the buffer and state
+            self.hotstring_state = None;
+            self.hotstring_buffer.clear();
+            None
+        }
+        _ => None,
+    }
+}
+
+
+fn on_key_event(
+    &mut self,
+    event: &KeyEvent,
+    config: &Config,
+    device: &InputDeviceInfo,
+) -> Result<bool, Box<dyn Error>> {
+    self.application_cache = None;
+    self.title_cache = None;
+    let key = Key::new(event.code());
+    
+    if key.code() < DISGUISED_EVENT_OFFSETTER {
+        debug!("=> {}: {:?}", event.value(), &key);
     }
 
-    fn on_key_event(
-        &mut self,
-        event: &KeyEvent,
-        config: &Config,
-        device: &InputDeviceInfo,
-    ) -> Result<bool, Box<dyn Error>> {
-        self.application_cache = None;
-        self.title_cache = None;
-        let key = Key::new(event.code());
+    let mut key_values = if let Some(key_action) = self.find_modmap(config, &key, device) {
+        self.dispatch_keys(key_action, key, event.value(), config)?
+    } else {
+        vec![(key, event.value())]
+    };
+    self.maintain_pressed_keys(key, event.value(), &mut key_values);
+    if !self.multi_purpose_keys.is_empty() {
+        key_values = self.flush_timeout_keys(key_values);
+    }
+
+    let mut send_original_relative_event = false;
+
+    for (key, value) in key_values.into_iter() {
+        if config.virtual_modifiers.contains(&key) {
+            self.update_modifier(key, value);
+            continue;
+        }
         
-        if key.code() < DISGUISED_EVENT_OFFSETTER {
-            debug!("=> {}: {:?}", event.value(), &key);
+        if MODIFIER_KEYS.contains(&key) {
+            self.update_modifier(key, value);
+            self.send_key(&key, value);
+            continue;
         }
-
-        let mut key_values = if let Some(key_action) = self.find_modmap(config, &key, device) {
-            self.dispatch_keys(key_action, key, event.value(), config)?
-        } else {
-            vec![(key, event.value())]
-        };
-        self.maintain_pressed_keys(key, event.value(), &mut key_values);
-        if !self.multi_purpose_keys.is_empty() {
-            key_values = self.flush_timeout_keys(key_values);
-        }
-
-        let mut send_original_relative_event = false;
-
-        for (key, value) in key_values.into_iter() {
-            if config.virtual_modifiers.contains(&key) {
-                self.update_modifier(key, value);
-                continue;
+        
+        if is_pressed(value) {
+            if self.escape_next_key {
+                self.escape_next_key = false;
             }
-            
-            if MODIFIER_KEYS.contains(&key) {
-                self.update_modifier(key, value);
-                self.send_key(&key, value);
-                continue;
-            }
-            
-            if is_pressed(value) {
-                if self.escape_next_key {
-                    self.escape_next_key = false;
-                }
 
-                // === FIX: PROCESS HOTSTRINGS FIRST ===
-                if let Some(matcher) = &config.hotstring_matcher {
-                    match self.key_to_char(&key) {
-                        Some(ch) => {
-                            self.hotstring_buffer.push_str(&ch);
-                            let (new_state, matched) = matcher.process(self.hotstring_state.as_ref(), &ch);
-                            self.hotstring_state = Some(new_state);
+            // === HOTSTRING PROCESSING ===
+            if let Some(matcher) = &config.hotstring_matcher {
+                match self.key_to_char(&key) {
+                    Some(ch) => {
+                        self.hotstring_buffer.push_str(&ch);
+                        
+                        // Cap buffer at 100 chars - remove oldest when full
+                        if self.hotstring_buffer.len() > 100 {
+                            self.hotstring_buffer = self.hotstring_buffer
+                                .chars()
+                                .skip(self.hotstring_buffer.len() - 100)
+                                .collect();
+                        }
+                        
+                        let (new_state, matched) = matcher.process(self.hotstring_state.as_ref(), &ch);
+                        self.hotstring_state = Some(new_state);
 
-                            if let Some(hotstring_match) = matched {
-                                let chars_to_delete = hotstring_match.trigger.len();
+                        if let Some(hotstring_match) = matched {
+                            // Calculate how many chars to delete
+                            // If omit_char is true (O option), we don't delete the ending character
+                            let chars_to_delete = if hotstring_match.omit_char {
+                                hotstring_match.trigger.len()
+                            } else {
+                                // Delete trigger + the ending character (space/enter/etc)
+                                hotstring_match.trigger.len() + 1
+                            };
 
-                                if hotstring_match.execute {
-                                    for _ in 0..chars_to_delete {
-                                        self.send_key(&Key::KEY_BACKSPACE, PRESS);
-                                        self.send_key(&Key::KEY_BACKSPACE, RELEASE);
-                                    }
-
-                                    if let Some(rest) = hotstring_match.replacement.strip_prefix("Run(") {
-                                        if let Some(cmd) = rest.strip_suffix(')') {
-                                            let cmd = cmd.trim().trim_matches(|c| c == '"' || c == '\'');
-                                            let command: Vec<String> = if cmd.starts_with("http://") || cmd.starts_with("https://") {
-                                                vec!["xdg-open".to_string(), cmd.to_string()]
-                                            } else {
-                                                cmd.split_whitespace().map(String::from).collect()
-                                            };
-                                            self.send_action(Action::Command(command));
-                                        }
-                                    }
-                                } else {
-                                    let final_replacement = hotstring_match.replacement.clone();
-                                    self.send_action(Action::TextExpansion {
-                                        trigger_len: chars_to_delete,
-                                        replacement: final_replacement,
-                                        add_space: !hotstring_match.omit_char && !hotstring_match.immediate,
-                                    });
+                            if hotstring_match.execute {
+                                // X option: execute the replacement as code
+                                for _ in 0..chars_to_delete {
+                                    self.send_key(&Key::KEY_BACKSPACE, PRESS);
+                                    self.send_key(&Key::KEY_BACKSPACE, RELEASE);
                                 }
 
-                                self.hotstring_buffer.clear();
-                                self.hotstring_state = None;
-                                continue;
+                                // Parse and run the command
+                                if let Some(rest) = hotstring_match.replacement.strip_prefix("Run(") {
+                                    if let Some(cmd) = rest.strip_suffix(')') {
+                                        let cmd = cmd.trim().trim_matches(|c| c == '"' || c == '\'');
+                                        let command: Vec<String> = if cmd.starts_with("http://") || cmd.starts_with("https://") {
+                                            vec!["xdg-open".to_string(), cmd.to_string()]
+                                        } else {
+                                            cmd.split_whitespace().map(String::from).collect()
+                                        };
+                                        self.send_action(Action::Command(command));
+                                    }
+                                }
+                            } else {
+                                // Regular text expansion via clipboard
+                                let final_replacement = hotstring_match.replacement.clone();
+                                self.send_action(Action::TextExpansion {
+                                    trigger_len: chars_to_delete,
+                                    replacement: final_replacement,
+                                    add_space: !hotstring_match.omit_char && !hotstring_match.immediate,
+                                });
                             }
-                        }
-                        None => {
-                            self.hotstring_state = None;
+
                             self.hotstring_buffer.clear();
+                            self.hotstring_state = None;
+                            continue;
                         }
                     }
+                    None => {
+                        // key_to_char returned None - this handles backspace and nav keys
+                        // Backspace already handled in key_to_char (pops one char)
+                        // Nav keys clear buffer in key_to_char
+                    }
                 }
-
-                // === NOW check hotkeys ===
-                if let Some(actions) = self.find_keymap(config, &key, device)? {
-                    self.dispatch_actions(&actions, &key, config)?;
-                    continue;
-                }
-                
-                if let Some(actions) = self.find_keymap(config, &KEY_MATCH_ANY, device)? {
-                    self.dispatch_actions(&actions, &KEY_MATCH_ANY, config)?;
-                    continue;
-                }
-
-                self.send_key(&key, value);
-            } else {
-                self.send_key(&key, value);
             }
 
-            if key.code() >= DISGUISED_EVENT_OFFSETTER && (key.code(), value) == (event.code(), event.value()) {
-                send_original_relative_event = true;
+            // === HOTKEY PROCESSING ===
+            if let Some(actions) = self.find_keymap(config, &key, device)? {
+                self.dispatch_actions(&actions, &key, config)?;
                 continue;
             }
+            
+            if let Some(actions) = self.find_keymap(config, &KEY_MATCH_ANY, device)? {
+                self.dispatch_actions(&actions, &KEY_MATCH_ANY, config)?;
+                continue;
+            }
+
+            self.send_key(&key, value);
+        } else {
+            self.send_key(&key, value);
         }
 
-        Ok(send_original_relative_event)
+        if key.code() >= DISGUISED_EVENT_OFFSETTER && (key.code(), value) == (event.code(), event.value()) {
+            send_original_relative_event = true;
+            continue;
+        }
     }
+
+    Ok(send_original_relative_event)
+}
+
 
     fn on_relative_event(
         &mut self,
@@ -507,81 +535,31 @@ impl EventHandler {
         None
     }
 
-    fn find_keymap(
-        &mut self,
-        config: &Config,
-        key: &Key,
-        device: &InputDeviceInfo,
-    ) -> Result<Option<Vec<TaggedAction>>, Box<dyn Error>> {
-        if !self.override_remaps.is_empty() {
-            let entries: Vec<OverrideEntry> = self
-                .override_remaps
-                .iter()
-                .flat_map(|map| map.get(key).cloned().unwrap_or_default())
-                .collect();
+fn find_keymap(
+    &mut self,
+    config: &Config,
+    key: &Key,
+    device: &InputDeviceInfo,
+) -> Result<Option<Vec<TaggedAction>>, Box<dyn Error>> {
+    if !self.override_remaps.is_empty() {
+        let entries: Vec<OverrideEntry> = self
+            .override_remaps
+            .iter()
+            .flat_map(|map| map.get(key).cloned().unwrap_or_default())
+            .collect();
 
-            if !entries.is_empty() {
-                self.remove_override()?;
+        if !entries.is_empty() {
+            self.remove_override()?;
 
-                for exact_match in [true, false] {
-                    let mut remaps = vec![];
-                    for entry in &entries {
-                        if entry.exact_match && !exact_match {
-                            continue;
-                        }
-                        let (extra_modifiers, missing_modifiers) = self.diff_modifiers(&entry.modifiers);
-                        if (exact_match && !extra_modifiers.is_empty()) || !missing_modifiers.is_empty() {
-                            continue;
-                        }
-
-                        let actions = with_extra_modifiers(&entry.actions, &extra_modifiers, entry.exact_match);
-                        let is_remap = is_remap(&entry.actions);
-
-                        if remaps.is_empty() && !is_remap {
-                            return Ok(Some(actions));
-                        } else if is_remap {
-                            remaps.extend(actions);
-                        }
-                    }
-                    if !remaps.is_empty() {
-                        return Ok(Some(remaps));
-                    }
-                }
-            }
-            self.timeout_override()?;
-        }
-
-        if let Some(entries) = config.keymap_table.get(key) {
             for exact_match in [true, false] {
                 let mut remaps = vec![];
-                for entry in entries {
+                for entry in &entries {
                     if entry.exact_match && !exact_match {
                         continue;
                     }
                     let (extra_modifiers, missing_modifiers) = self.diff_modifiers(&entry.modifiers);
                     if (exact_match && !extra_modifiers.is_empty()) || !missing_modifiers.is_empty() {
                         continue;
-                    }
-                    if let Some(window_matcher) = &entry.title {
-                        if !self.match_window(window_matcher) {
-                            continue;
-                        }
-                    }
-
-                    if let Some(application_matcher) = &entry.application {
-                        if !self.match_application(application_matcher) {
-                            continue;
-                        }
-                    }
-                    if let Some(device_matcher) = &entry.device {
-                        if !self.match_device(device_matcher, device) {
-                            continue;
-                        }
-                    }
-                    if let Some(modes) = &entry.mode {
-                        if !modes.contains(&self.mode) {
-                            continue;
-                        }
                     }
 
                     let actions = with_extra_modifiers(&entry.actions, &extra_modifiers, entry.exact_match);
@@ -590,7 +568,7 @@ impl EventHandler {
                     if remaps.is_empty() && !is_remap {
                         return Ok(Some(actions));
                     } else if is_remap {
-                        remaps.extend(actions)
+                        remaps.extend(actions);
                     }
                 }
                 if !remaps.is_empty() {
@@ -598,8 +576,95 @@ impl EventHandler {
                 }
             }
         }
-        Ok(None)
+        self.timeout_override()?;
     }
+
+    if let Some(entries) = config.keymap_table.get(key) {
+        for exact_match in [true, false] {
+            // First pass: look for contextual matches
+            for entry in entries {
+                if entry.exact_match && !exact_match {
+                    continue;
+                }
+                let (extra_modifiers, missing_modifiers) = self.diff_modifiers(&entry.modifiers);
+                if (exact_match && !extra_modifiers.is_empty()) || !missing_modifiers.is_empty() {
+                    continue;
+                }
+                
+                // Skip if has device/mode filters that don't match
+                if let Some(device_matcher) = &entry.device {
+                    if !self.match_device(device_matcher, device) {
+                        continue;
+                    }
+                }
+                if let Some(modes) = &entry.mode {
+                    if !modes.contains(&self.mode) {
+                        continue;
+                    }
+                }
+                
+                // Check window context
+                if let Some(window_matcher) = &entry.title {
+                    if self.match_window(window_matcher) {
+                        let actions = with_extra_modifiers(&entry.actions, &extra_modifiers, entry.exact_match);
+                        return Ok(Some(actions));
+                    }
+                    continue; // Has window context but didn't match
+                }
+
+                // Check application context
+                if let Some(application_matcher) = &entry.application {
+                    if self.match_application(application_matcher) {
+                        let actions = with_extra_modifiers(&entry.actions, &extra_modifiers, entry.exact_match);
+                        return Ok(Some(actions));
+                    }
+                    continue; // Has app context but didn't match
+                }
+            }
+            
+            // Second pass: look for global matches (no context)
+            let mut remaps = vec![];
+            for entry in entries {
+                if entry.exact_match && !exact_match {
+                    continue;
+                }
+                let (extra_modifiers, missing_modifiers) = self.diff_modifiers(&entry.modifiers);
+                if (exact_match && !extra_modifiers.is_empty()) || !missing_modifiers.is_empty() {
+                    continue;
+                }
+                
+                // Skip entries with context
+                if entry.title.is_some() || entry.application.is_some() {
+                    continue;
+                }
+                
+                if let Some(device_matcher) = &entry.device {
+                    if !self.match_device(device_matcher, device) {
+                        continue;
+                    }
+                }
+                if let Some(modes) = &entry.mode {
+                    if !modes.contains(&self.mode) {
+                        continue;
+                    }
+                }
+
+                let actions = with_extra_modifiers(&entry.actions, &extra_modifiers, entry.exact_match);
+                let is_remap = is_remap(&entry.actions);
+
+                if remaps.is_empty() && !is_remap {
+                    return Ok(Some(actions));
+                } else if is_remap {
+                    remaps.extend(actions)
+                }
+            }
+            if !remaps.is_empty() {
+                return Ok(Some(remaps));
+            }
+        }
+    }
+    Ok(None)
+}
 
     fn dispatch_actions(&mut self, actions: &Vec<TaggedAction>, key: &Key, config: &Config) -> Result<(), Box<dyn Error>> {
         for action in actions {
@@ -743,91 +808,53 @@ impl EventHandler {
         }
     }
 
-    fn match_window(&mut self, window_matcher: &OnlyOrNot) -> bool {
-        if self.title_cache.is_none() {
-            match self.application_client.current_window() {
-                Some(title) if !title.is_empty() => self.title_cache = Some(title),
-                _ => {
-                    #[cfg(feature = "kde")]
-                    if let Ok(output) = std::process::Command::new("kdotool")
-                        .arg("getactivewindow")
-                        .arg("getwindowname")
-                        .output()
-                    {
-                        if output.status.success() {
-                            let title = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                            self.title_cache = Some(title);
-                        } else {
-                            self.title_cache = Some(String::new());
-                        }
-
-                    #[cfg(not(feature = "kde"))]
-                    {
-                        self.title_cache = Some(String::new());
-                    }
-
-                    #[cfg(not(feature = "kde"))]
-                    {
-                        self.application_cache = Some(String::new());
-                    }
-                    } else {
-                        self.title_cache = Some(String::new());
-                    }
-                }
-            }
-        }
-
-        if let Some(title) = &self.title_cache {
-            if let Some(title_only) = &window_matcher.only {
-                return title_only.iter().any(|m| m.matches(title));
-            }
-            if let Some(title_not) = &window_matcher.not {
-                return title_not.iter().all(|m| !m.matches(title));
-            }
-        }
-        false
+  fn match_window(&mut self, window_matcher: &OnlyOrNot) -> bool {
+    if self.title_cache.is_none() {
+        self.title_cache = self.application_client.current_window()
+            .or(Some(String::new()));
     }
 
-    fn match_application(&mut self, application_matcher: &OnlyOrNot) -> bool {
-        if self.application_cache.is_none() {
-            match self.application_client.current_application() {
-                Some(application) if !application.is_empty() => self.application_cache = Some(application),
-                _ => {
-                    #[cfg(feature = "kde")]
-                    if let Ok(output) = std::process::Command::new("kdotool")
-                        .arg("getactivewindow")
-                        .arg("getwindowclassname")
-                        .output()
-                    {
-                        if output.status.success() {
-                            let application = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                            self.application_cache = Some(application);
-                        } else {
-                            self.application_cache = Some(String::new());
-                        }
-
-                    #[cfg(not(feature = "kde"))]
-                    {
-                        self.application_cache = Some(String::new());
+    if let Some(title) = &self.title_cache {
+        if let Some(title_only) = &window_matcher.only {
+            return title_only.iter().any(|m| {
+                match m {
+                            ApplicationMatcher::Literal(literal) => {
+                        title.to_lowercase().contains(&literal.to_lowercase())
                     }
-                    } else {
-                        self.application_cache = Some(String::new());
-                    }
+                    _ => m.matches(title)
                 }
-            }
+            });
         }
+        if let Some(title_not) = &window_matcher.not {
+            return title_not.iter().all(|m| !m.matches(title));
+        }
+    }
+    false
+}
 
-        if let Some(application) = &self.application_cache {
-            if let Some(application_only) = &application_matcher.only {
-                return application_only.iter().any(|m| m.matches(application));
-            }
-            if let Some(application_not) = &application_matcher.not {
-                return application_not.iter().all(|m| !m.matches(application));
-            }
-        }
-        false
+fn match_application(&mut self, application_matcher: &OnlyOrNot) -> bool {
+    if self.application_cache.is_none() {
+        self.application_cache = self.application_client.current_application()
+            .or(Some(String::new()));
     }
 
+    if let Some(application) = &self.application_cache {
+        if let Some(application_only) = &application_matcher.only {
+            return application_only.iter().any(|m| {
+                match m {
+                        ApplicationMatcher::Literal(literal) => {
+                        application.to_lowercase().contains(&literal.to_lowercase())
+                    }
+                    _ => m.matches(application)
+                }
+            });
+        }
+        if let Some(application_not) = &application_matcher.not {
+            return application_not.iter().all(|m| !m.matches(application));
+        }
+    }
+    false
+}
     fn match_device(&self, device_matcher: &crate::config::device::Device, device: &InputDeviceInfo) -> bool {
         if let Some(device_only) = &device_matcher.only {
             return device_only.iter().any(|m| device.matches(m));

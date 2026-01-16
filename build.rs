@@ -20,6 +20,18 @@ fn main() {
             return;
         }
         
+        let home = env::var("HOME").unwrap_or_else(|_| String::from("/tmp"));
+        let install_prefix = format!("{}/.local", home);
+        
+        let plugin_path = format!("{}/lib/plugins/kwin/effects/plugins/ahk-wayland-activeclient.so", install_prefix);
+        if Path::new(&plugin_path).exists() {
+            println!("cargo:warning=✓ KWin plugin already installed at {}, skipping build/install", plugin_path);
+            println!("cargo:warning=To enable if needed, run:");
+            println!("cargo:warning=  kwriteconfig6 --file kwinrc --group Plugins --key ahk-wayland-activeclientEnabled true");
+            println!("cargo:warning=  qdbus org.kde.KWin /KWin reconfigure");
+            return;
+        }
+        
         // Always clean and rebuild
         if build_dir.exists() {
             println!("cargo:warning=Cleaning old build...");

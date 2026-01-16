@@ -1,3 +1,10 @@
 /target
 
 
+src/client/kdeactiveeventlistener/build/
+src/client/kdeactiveeventlistener/CMakeFiles/
+src/client/kdeactiveeventlistener/CMakeCache.txt
+src/client/kdeactiveeventlistener/cmake_install.cmake
+src/client/kdeactiveeventlistener/Makefile
+src/client/kdeactiveeventlistener/*.so
+src/client/kdeactiveeventlistener/*.a
