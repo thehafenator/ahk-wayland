@@ -2,7 +2,7 @@
 
 ![crates.io](https://img.shields.io/crates/v/xremap) [![GitHub Actions](https://github.com/k0kubun/xremap/actions/workflows/build.yml/badge.svg)](https://github.com/k0kubun/xremap/actions/workflows/build.yml)
 
-Notice: Ahk-Wayland is a fork of 'xremap', a keyboard remapper for linux as described below from the readme. The key change being implemented is to allow AutoHotkey Version 2-like syntax. This is very much in the alpha stage of adding this, and the scope/end goal of the project is TBD.
+Notice: **Ahk-Wayland** is a fork of 'xremap', a keyboard remapper for linux as described below from the readme. The key change being implemented is to allow AutoHotkey Version 2-like syntax. This is very much in the alpha stage of adding this, and the scope/end goal of the project is TBD.
 
 
 `xremap` is a key remapper for Linux. Unlike `xmodmap`, it supports app-specific remapping and Wayland.
